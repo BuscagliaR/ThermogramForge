@@ -112,6 +112,11 @@ custom_css <- function() {
   .plotly {
     border: 1px solid #dee2e6;
     border-radius: 0.375rem;
+    background-color: white;
+  }
+  
+  .js-plotly-plot .plotly .main-svg {
+    border-radius: 0.375rem;
   }
   
   /* Status badges */

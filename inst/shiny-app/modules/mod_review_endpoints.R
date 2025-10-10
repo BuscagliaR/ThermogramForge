@@ -170,12 +170,12 @@ mod_review_endpoints_server <- function(id, app_data) {
       
       samples <- app_data$processed_data$samples
       
-      # Create data frame for grid
+      # Create data frame for grid with human-readable column names
       grid_df <- data.frame(
-        sample_id = character(),
-        signal_quality = character(),
-        reviewed = character(),
-        excluded = character(),
+        Sample_ID = character(),
+        Signal_Quality = character(),
+        Reviewed = character(),
+        Excluded = character(),
         stringsAsFactors = FALSE
       )
       
@@ -184,14 +184,17 @@ mod_review_endpoints_server <- function(id, app_data) {
         
         if (sample$success) {
           grid_df <- rbind(grid_df, data.frame(
-            sample_id = sample_id,
-            signal_quality = if (sample$has_signal) "Signal" else "No Signal",
-            reviewed = if (sample$reviewed) "Yes" else "No",
-            excluded = if (sample$excluded) "Yes" else "No",
+            Sample_ID = sample_id,
+            Signal_Quality = if (sample$has_signal) "Signal" else "No Signal",
+            Reviewed = if (sample$reviewed) "Yes" else "No",
+            Excluded = if (sample$excluded) "Yes" else "No",
             stringsAsFactors = FALSE
           ))
         }
       }
+      
+      # Set column names for display
+      colnames(grid_df) <- c("Sample ID", "Signal Quality", "Reviewed", "Excluded")
       
       grid_df
     })
@@ -225,7 +228,7 @@ mod_review_endpoints_server <- function(id, app_data) {
         class = "compact hover row-border"
       ) %>%
         DT::formatStyle(
-          'signal_quality',
+          'Signal Quality',
           backgroundColor = DT::styleEqual(
             c('Signal', 'No Signal'),
             c('#d4edda', '#fff3cd')
@@ -237,7 +240,7 @@ mod_review_endpoints_server <- function(id, app_data) {
           fontWeight = 'bold'
         ) %>%
         DT::formatStyle(
-          'reviewed',
+          'Reviewed',
           color = DT::styleEqual(
             c('Yes', 'No'),
             c('#198754', '#6c757d')
@@ -245,7 +248,7 @@ mod_review_endpoints_server <- function(id, app_data) {
           fontWeight = 'bold'
         ) %>%
         DT::formatStyle(
-          'excluded',
+          'Excluded',
           color = DT::styleEqual(
             c('Yes', 'No'),
             c('#dc3545', '#6c757d')
@@ -267,7 +270,7 @@ mod_review_endpoints_server <- function(id, app_data) {
       selected_row <- input$sample_grid_rows_selected
       
       if (selected_row <= nrow(grid_data)) {
-        sample_id <- grid_data$sample_id[selected_row]
+        sample_id <- grid_data[[1]][selected_row]  # First column is Sample ID
         
         # Only update if the sample actually changed (prevent reactivity loop)
         if (is.null(selected_sample()) || selected_sample() != sample_id) {
@@ -323,23 +326,151 @@ mod_review_endpoints_server <- function(id, app_data) {
         )
       }
       
-      # Placeholder for plot - will add plotly in Stage 2
-      div(
-        style = "height: 400px; border: 1px solid #dee2e6; border-radius: 0.375rem; background-color: #f8f9fa;",
-        class = "d-flex align-items-center justify-content-center",
-        div(
-          class = "text-center text-muted",
-          icon("chart-line", class = "fa-3x mb-3"),
-          h5("Interactive Plot Coming Soon"),
-          p(
-            sprintf("Sample: %s", selected_sample()), br(),
-            sprintf("Data points: %d", length(sample$temperature)), br(),
-            sprintf("Temperature range: %.1f - %.1f°C", 
-                    min(sample$temperature), 
-                    max(sample$temperature))
+      # Render the plotly output
+      plotly::plotlyOutput(ns("thermogram_plot"), height = "400px")
+    })
+    
+    # Render thermogram plot
+    output$thermogram_plot <- plotly::renderPlotly({
+      req(selected_sample())
+      
+      sample <- app_data$processed_data$samples[[selected_sample()]]
+      
+      if (!sample$success) return(NULL)
+      
+      # Prepare data for plotting - ensure vectors are clean
+      temp <- as.numeric(sample$temperature)
+      dcp_orig <- as.numeric(sample$dcp_original)
+      
+      # Remove any remaining NAs
+      valid_idx <- !is.na(temp) & !is.na(dcp_orig)
+      temp <- temp[valid_idx]
+      dcp_orig <- dcp_orig[valid_idx]
+      
+      if (length(temp) < 2) {
+        return(plotly::plot_ly() %>%
+                 plotly::layout(
+                   title = "Insufficient data to plot",
+                   xaxis = list(title = "Temperature (°C)"),
+                   yaxis = list(title = "dCp")
+                 ))
+      }
+      
+      # Get y-axis range for vertical lines
+      y_min <- min(dcp_orig, na.rm = TRUE)
+      y_max <- max(dcp_orig, na.rm = TRUE)
+      y_range <- y_max - y_min
+      y_padding <- y_range * 0.1
+      
+      # Create the base plot
+      p <- plotly::plot_ly()
+      
+      # Add baseline endpoints as vertical lines
+      lower_endpoint <- as.numeric(sample$lower_endpoint)
+      upper_endpoint <- as.numeric(sample$upper_endpoint)
+      
+      # Add transition region shading first (so it's behind)
+      p <- p %>%
+        plotly::add_polygons(
+          x = c(lower_endpoint, upper_endpoint, upper_endpoint, lower_endpoint),
+          y = c(y_min - y_padding, y_min - y_padding, y_max + y_padding, y_max + y_padding),
+          fillcolor = "rgba(200, 200, 200, 0.2)",
+          line = list(width = 0),
+          name = "Transition Region",
+          showlegend = TRUE,
+          hoverinfo = "skip"
+        )
+      
+      # Add lower endpoint line
+      p <- p %>%
+        plotly::add_segments(
+          x = lower_endpoint, 
+          xend = lower_endpoint,
+          y = y_min - y_padding,
+          yend = y_max + y_padding,
+          line = list(color = "#2ca02c", width = 2, dash = "dash"),
+          name = "Lower Endpoint",
+          showlegend = TRUE,
+          hovertemplate = paste0(
+            "<b>Lower Endpoint</b><br>",
+            "Temperature: ", sprintf("%.1f", lower_endpoint), "°C<br>",
+            "<extra></extra>"
           )
         )
-      )
+      
+      # Add upper endpoint line
+      p <- p %>%
+        plotly::add_segments(
+          x = upper_endpoint,
+          xend = upper_endpoint,
+          y = y_min - y_padding,
+          yend = y_max + y_padding,
+          line = list(color = "#9467bd", width = 2, dash = "dash"),
+          name = "Upper Endpoint",
+          showlegend = TRUE,
+          hovertemplate = paste0(
+            "<b>Upper Endpoint</b><br>",
+            "Temperature: ", sprintf("%.1f", upper_endpoint), "°C<br>",
+            "<extra></extra>"
+          )
+        )
+      
+      # Add raw data line on top
+      p <- p %>%
+        plotly::add_lines(
+          x = temp,
+          y = dcp_orig,
+          name = "Raw Data",
+          line = list(color = "#1f77b4", width = 2),
+          hovertemplate = paste(
+            "<b>Temperature:</b> %{x:.1f}°C<br>",
+            "<b>dCp:</b> %{y:.4f}<br>",
+            "<extra></extra>"
+          )
+        )
+      
+      # Configure layout
+      p <- p %>%
+        plotly::layout(
+          xaxis = list(
+            title = "Temperature (°C)",
+            showgrid = TRUE,
+            gridcolor = "#e0e0e0",
+            zeroline = FALSE
+          ),
+          yaxis = list(
+            title = "dCp (kcal/mol/°C)",
+            showgrid = TRUE,
+            gridcolor = "#e0e0e0",
+            zeroline = TRUE,
+            zerolinecolor = "#808080",
+            zerolinewidth = 1,
+            range = c(y_min - y_padding, y_max + y_padding)
+          ),
+          plot_bgcolor = "white",
+          paper_bgcolor = "white",
+          hovermode = "closest",
+          showlegend = TRUE,
+          legend = list(
+            x = 0.02,
+            y = 0.98,
+            bgcolor = "rgba(255, 255, 255, 0.8)",
+            bordercolor = "#dee2e6",
+            borderwidth = 1
+          ),
+          margin = list(l = 60, r = 30, t = 30, b = 50)
+        ) %>%
+        plotly::config(
+          displayModeBar = TRUE,
+          modeBarButtonsToRemove = list(
+            "pan2d", "lasso2d", "select2d", "autoScale2d",
+            "hoverClosestCartesian", "hoverCompareCartesian",
+            "toggleSpikelines"
+          ),
+          displaylogo = FALSE
+        )
+      
+      p
     })
     
     # Render review controls
@@ -430,7 +561,7 @@ mod_review_endpoints_server <- function(id, app_data) {
       
       # Get current selection index before replacing data
       grid_data <- isolate(sample_grid_data())
-      current_idx <- which(grid_data$sample_id == selected_sample())
+      current_idx <- which(grid_data[[1]] == selected_sample())  # First column is Sample ID
       
       # Refresh grid data
       proxy <- DT::dataTableProxy("sample_grid")
@@ -460,7 +591,7 @@ mod_review_endpoints_server <- function(id, app_data) {
       
       # Get current selection index before replacing data
       grid_data <- isolate(sample_grid_data())
-      current_idx <- which(grid_data$sample_id == selected_sample())
+      current_idx <- which(grid_data[[1]] == selected_sample())  # First column is Sample ID
       
       # Refresh grid data
       proxy <- DT::dataTableProxy("sample_grid")
@@ -486,11 +617,11 @@ mod_review_endpoints_server <- function(id, app_data) {
       req(selected_sample())
       
       grid_data <- sample_grid_data()
-      current_idx <- which(grid_data$sample_id == selected_sample())
+      current_idx <- which(grid_data[[1]] == selected_sample())  # First column is Sample ID
       
       if (current_idx > 1) {
         new_idx <- current_idx - 1
-        new_sample <- grid_data$sample_id[new_idx]
+        new_sample <- grid_data[[1]][new_idx]
         selected_sample(new_sample)
         
         # Update grid selection with flag to prevent observer trigger
@@ -508,11 +639,11 @@ mod_review_endpoints_server <- function(id, app_data) {
       req(selected_sample())
       
       grid_data <- sample_grid_data()
-      current_idx <- which(grid_data$sample_id == selected_sample())
+      current_idx <- which(grid_data[[1]] == selected_sample())  # First column is Sample ID
       
       if (current_idx < nrow(grid_data)) {
         new_idx <- current_idx + 1
-        new_sample <- grid_data$sample_id[new_idx]
+        new_sample <- grid_data[[1]][new_idx]
         selected_sample(new_sample)
         
         # Update grid selection with flag to prevent observer trigger
