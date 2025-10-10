@@ -129,7 +129,54 @@ custom_css <- function() {
   .p-3 { padding: 1rem !important; }
   .d-flex { display: flex !important; }
   .gap-2 > * + * { margin-left: 0.5rem; }
+  .justify-content-between { justify-content: space-between !important; }
+  .align-items-center { align-items: center !important; }
   .text-center { text-align: center; }
+  
+  /* Badge styling */
+  .badge {
+    display: inline-block;
+    padding: 0.35em 0.65em;
+    font-size: 0.875em;
+    font-weight: 600;
+    line-height: 1;
+    color: #fff;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: baseline;
+    border-radius: 0.375rem;
+  }
+  
+  .bg-warning {
+    background-color: #ffc107 !important;
+    color: #000 !important;
+  }
+  
+  /* DataTable row styling - very specific selectors to override defaults */
+  table.dataTable.hover tbody tr.selected,
+  table.dataTable.display tbody tr.selected,
+  table.dataTable tbody tr.selected,
+  table.dataTable tbody tr.selected > td,
+  table.dataTable.row-border tbody tr.selected > td,
+  table.dataTable.cell-border tbody tr.selected > td {
+    background-color: rgba(13, 110, 253, 0.08) !important;
+    box-shadow: inset 0 0 0 9999px rgba(13, 110, 253, 0.08) !important;
+  }
+  
+  table.dataTable tbody tr.selected:hover,
+  table.dataTable tbody tr.selected:hover > td {
+    background-color: rgba(13, 110, 253, 0.12) !important;
+    box-shadow: inset 0 0 0 9999px rgba(13, 110, 253, 0.12) !important;
+  }
+  
+  table.dataTable.row-border tbody tr:hover,
+  table.dataTable.row-border tbody tr:hover > td {
+    background-color: rgba(13, 110, 253, 0.05) !important;
+  }
+  
+  table.dataTable.compact tbody td {
+    padding: 0.5rem;
+  }
   
   /* Custom alert styling */
   .alert {

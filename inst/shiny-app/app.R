@@ -29,12 +29,14 @@ ui <- page_navbar(
   theme = thermogram_theme(),
   fillable = TRUE,
   
-  # Enable shinyjs
-  useShinyjs(),
-  
-  # Add custom CSS
-  tags$head(
-    tags$style(HTML(custom_css()))
+  header = tagList(
+    # Enable shinyjs
+    useShinyjs(),
+    
+    # Add custom CSS
+    tags$head(
+      tags$style(HTML(custom_css()))
+    )
   ),
   
   # Tab 1: Data Overview
@@ -84,6 +86,20 @@ server <- function(input, output, session) {
   mod_data_overview_server("data_overview", app_data)
   mod_review_endpoints_server("review_endpoints", app_data)
   mod_report_builder_server("report_builder", app_data)
+  
+  # Handle navigation requests from modules
+  observeEvent(app_data$navigate_to, {
+    req(app_data$navigate_to)
+    
+    updateNavbarPage(
+      session = session,
+      inputId = "main_navbar",
+      selected = app_data$navigate_to
+    )
+    
+    # Reset the flag
+    app_data$navigate_to <- NULL
+  })
   
   # Session cleanup
   session$onSessionEnded(function() {

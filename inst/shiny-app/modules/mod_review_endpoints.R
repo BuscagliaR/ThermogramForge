@@ -13,39 +13,8 @@ mod_review_endpoints_ui <- function(id) {
     div(
       class = "container-fluid p-3",
       
-      # Placeholder card
-      div(
-        class = "card",
-        div(
-          class = "card-header",
-          icon("chart-line"), " Review Endpoints"
-        ),
-        div(
-          class = "card-body",
-          h3("Interactive Thermogram Review"),
-          p(
-            "This module will provide interactive plotting with manual ",
-            "endpoint adjustment, undo/redo capability, and sample navigation."
-          ),
-          p(
-            class = "text-muted",
-            "Features to be implemented in Phase 4-6:"
-          ),
-          tags$ul(
-            tags$li("Sample overview grid with status indicators"),
-            tags$li("Interactive plotly visualization"),
-            tags$li("Click-to-adjust baseline endpoints"),
-            tags$li("Undo/redo functionality"),
-            tags$li("Review status tracking (reviewed/excluded)")
-          ),
-          hr(),
-          p(
-            class = "text-info",
-            icon("info-circle"),
-            " Upload data in the Data Overview tab to enable this module."
-          )
-        )
-      )
+      # Check if data is available
+      uiOutput(ns("review_content"))
     )
   )
 }
@@ -59,11 +28,513 @@ mod_review_endpoints_ui <- function(id) {
 mod_review_endpoints_server <- function(id, app_data) {
   moduleServer(id, function(input, output, session) {
     
-    # TODO: Implement review interface logic in Phase 4-6
-    # - Sample grid with DT
-    # - Plotly visualization
-    # - Endpoint adjustment
-    # - Undo/redo stack management
+    ns <- session$ns
     
+    # Track currently selected sample
+    selected_sample <- reactiveVal(NULL)
+    
+    # Flag to prevent observer triggering during programmatic selection
+    programmatic_selection <- reactiveVal(FALSE)
+    
+    # Render main content
+    output$review_content <- renderUI({
+      
+      # Check if processed data exists
+      if (is.null(app_data$processed_data)) {
+        return(
+          div(
+            class = "card",
+            div(
+              class = "card-body text-center",
+              icon("info-circle", class = "fa-3x text-muted mb-3"),
+              h4("No Processed Data Available"),
+              p(
+                "Please upload and process thermogram data in the ",
+                tags$strong("Data Overview"),
+                " tab before reviewing endpoints."
+              ),
+              actionButton(
+                ns("goto_overview"),
+                "Go to Data Overview",
+                icon = icon("arrow-left"),
+                class = "btn-primary"
+              )
+            )
+          )
+        )
+      }
+      
+      # Data is available - show review interface
+      tagList(
+        # Header row
+        div(
+          class = "row mb-3",
+          div(
+            class = "col-12",
+            div(
+              class = "card",
+              div(
+                class = "card-body",
+                div(
+                  class = "d-flex justify-content-between align-items-center",
+                  div(
+                    h4(
+                      icon("chart-line"), 
+                      " Review Baseline Endpoints",
+                      class = "mb-0"
+                    ),
+                    p(
+                      class = "text-muted mb-0",
+                      sprintf(
+                        "Dataset: %d samples processed",
+                        app_data$processed_data$summary$n_success
+                      )
+                    )
+                  ),
+                  div(
+                    actionButton(
+                      ns("save_btn"),
+                      "Save Processed Data",
+                      icon = icon("save"),
+                      class = "btn-success"
+                    )
+                  )
+                )
+              )
+            )
+          )
+        ),
+        
+        # Main content row
+        div(
+          class = "row",
+          
+          # Left column: Sample grid
+          div(
+            class = "col-md-5",
+            div(
+              class = "card",
+              div(
+                class = "card-header",
+                icon("table"), " Sample Overview"
+              ),
+              div(
+                class = "card-body",
+                DT::dataTableOutput(ns("sample_grid"))
+              )
+            )
+          ),
+          
+          # Right column: Thermogram plot and controls
+          div(
+            class = "col-md-7",
+            
+            # Plot card
+            div(
+              class = "card mb-3",
+              div(
+                class = "card-header",
+                uiOutput(ns("plot_header"))
+              ),
+              div(
+                class = "card-body",
+                uiOutput(ns("plot_area"))
+              )
+            ),
+            
+            # Controls card
+            div(
+              class = "card",
+              div(
+                class = "card-header",
+                icon("sliders-h"), " Review Controls"
+              ),
+              div(
+                class = "card-body",
+                uiOutput(ns("review_controls"))
+              )
+            )
+          )
+        )
+      )
+    })
+    
+    # Navigate to Data Overview
+    observeEvent(input$goto_overview, {
+      app_data$navigate_to <- "data_overview"
+    })
+    
+    # Create sample grid data
+    sample_grid_data <- reactive({
+      req(app_data$processed_data)
+      
+      samples <- app_data$processed_data$samples
+      
+      # Create data frame for grid
+      grid_df <- data.frame(
+        sample_id = character(),
+        signal_quality = character(),
+        reviewed = character(),
+        excluded = character(),
+        stringsAsFactors = FALSE
+      )
+      
+      for (sample_id in names(samples)) {
+        sample <- samples[[sample_id]]
+        
+        if (sample$success) {
+          grid_df <- rbind(grid_df, data.frame(
+            sample_id = sample_id,
+            signal_quality = if (sample$has_signal) "Signal" else "No Signal",
+            reviewed = if (sample$reviewed) "Yes" else "No",
+            excluded = if (sample$excluded) "Yes" else "No",
+            stringsAsFactors = FALSE
+          ))
+        }
+      }
+      
+      grid_df
+    })
+    
+    # Render sample grid
+    output$sample_grid <- DT::renderDataTable({
+      
+      grid_data <- sample_grid_data()
+      
+      DT::datatable(
+        grid_data,
+        selection = list(mode = "single", selected = 1),
+        rownames = FALSE,
+        options = list(
+          pageLength = 10,
+          lengthMenu = c(5, 10, 25, 50),
+          dom = 'ftp',
+          scrollY = "400px",
+          scrollCollapse = TRUE,
+          columnDefs = list(
+            list(
+              targets = 0,
+              className = "dt-left"
+            ),
+            list(
+              targets = 1:3,
+              className = "dt-center"
+            )
+          )
+        ),
+        class = "compact hover row-border"
+      ) %>%
+        DT::formatStyle(
+          'signal_quality',
+          backgroundColor = DT::styleEqual(
+            c('Signal', 'No Signal'),
+            c('#d4edda', '#fff3cd')
+          ),
+          color = DT::styleEqual(
+            c('Signal', 'No Signal'),
+            c('#155724', '#856404')
+          ),
+          fontWeight = 'bold'
+        ) %>%
+        DT::formatStyle(
+          'reviewed',
+          color = DT::styleEqual(
+            c('Yes', 'No'),
+            c('#198754', '#6c757d')
+          ),
+          fontWeight = 'bold'
+        ) %>%
+        DT::formatStyle(
+          'excluded',
+          color = DT::styleEqual(
+            c('Yes', 'No'),
+            c('#dc3545', '#6c757d')
+          ),
+          fontWeight = 'bold'
+        )
+    })
+    
+    # Update selected sample when row is clicked
+    observeEvent(input$sample_grid_rows_selected, {
+      req(input$sample_grid_rows_selected)
+      
+      # Skip if this is a programmatic selection
+      if (isolate(programmatic_selection())) {
+        return()
+      }
+      
+      grid_data <- sample_grid_data()
+      selected_row <- input$sample_grid_rows_selected
+      
+      if (selected_row <= nrow(grid_data)) {
+        sample_id <- grid_data$sample_id[selected_row]
+        
+        # Only update if the sample actually changed (prevent reactivity loop)
+        if (is.null(selected_sample()) || selected_sample() != sample_id) {
+          selected_sample(sample_id)
+        }
+      }
+    }, ignoreNULL = TRUE, ignoreInit = FALSE, priority = 1)
+    
+    # Initialize first sample selection
+    observe({
+      req(app_data$processed_data)
+      
+      if (is.null(selected_sample())) {
+        grid_data <- sample_grid_data()
+        if (nrow(grid_data) > 0) {
+          selected_sample(grid_data$sample_id[1])
+        }
+      }
+    })
+    
+    # Render plot header
+    output$plot_header <- renderUI({
+      req(selected_sample())
+      
+      sample <- app_data$processed_data$samples[[selected_sample()]]
+      
+      tagList(
+        icon("chart-line"), 
+        sprintf(" Thermogram: %s", selected_sample()),
+        if (!sample$has_signal) {
+          tags$span(
+            class = "badge bg-warning ms-2",
+            "No Signal Detected"
+          )
+        }
+      )
+    })
+    
+    # Render plot area
+    output$plot_area <- renderUI({
+      req(selected_sample())
+      
+      sample <- app_data$processed_data$samples[[selected_sample()]]
+      
+      if (!sample$success) {
+        return(
+          div(
+            class = "alert alert-danger",
+            icon("exclamation-triangle"),
+            " Error processing this sample: ",
+            sample$error
+          )
+        )
+      }
+      
+      # Placeholder for plot - will add plotly in Stage 2
+      div(
+        style = "height: 400px; border: 1px solid #dee2e6; border-radius: 0.375rem; background-color: #f8f9fa;",
+        class = "d-flex align-items-center justify-content-center",
+        div(
+          class = "text-center text-muted",
+          icon("chart-line", class = "fa-3x mb-3"),
+          h5("Interactive Plot Coming Soon"),
+          p(
+            sprintf("Sample: %s", selected_sample()), br(),
+            sprintf("Data points: %d", length(sample$temperature)), br(),
+            sprintf("Temperature range: %.1f - %.1f°C", 
+                    min(sample$temperature), 
+                    max(sample$temperature))
+          )
+        )
+      )
+    })
+    
+    # Render review controls
+    output$review_controls <- renderUI({
+      req(selected_sample())
+      
+      sample <- app_data$processed_data$samples[[selected_sample()]]
+      
+      if (!sample$success) {
+        return(
+          p(class = "text-muted", "No controls available for failed samples.")
+        )
+      }
+      
+      tagList(
+        div(
+          class = "row mb-3",
+          div(
+            class = "col-md-6",
+            checkboxInput(
+              ns("mark_reviewed"),
+              "Mark as Reviewed",
+              value = sample$reviewed
+            )
+          ),
+          div(
+            class = "col-md-6",
+            checkboxInput(
+              ns("mark_excluded"),
+              "Exclude from Analysis",
+              value = sample$excluded
+            )
+          )
+        ),
+        
+        hr(),
+        
+        div(
+          class = "d-flex justify-content-between",
+          div(
+            actionButton(
+              ns("prev_sample"),
+              "Previous",
+              icon = icon("arrow-left"),
+              class = "btn-secondary"
+            ),
+            actionButton(
+              ns("next_sample"),
+              "Next",
+              icon = icon("arrow-right"),
+              class = "btn-secondary ms-2"
+            )
+          ),
+          div(
+            actionButton(
+              ns("undo_btn"),
+              "Undo",
+              icon = icon("undo"),
+              class = "btn-outline-secondary",
+              disabled = "disabled"
+            ),
+            actionButton(
+              ns("redo_btn"),
+              "Redo",
+              icon = icon("redo"),
+              class = "btn-outline-secondary ms-2",
+              disabled = "disabled"
+            )
+          )
+        ),
+        
+        hr(),
+        
+        p(
+          class = "text-muted small mb-0",
+          icon("info-circle"),
+          " Endpoint adjustment coming in Stage 3"
+        )
+      )
+    })
+    
+    # Handle reviewed checkbox
+    observeEvent(input$mark_reviewed, {
+      req(selected_sample())
+      
+      # Update the data
+      app_data$processed_data$samples[[selected_sample()]]$reviewed <- input$mark_reviewed
+      
+      # Get current selection index before replacing data
+      grid_data <- isolate(sample_grid_data())
+      current_idx <- which(grid_data$sample_id == selected_sample())
+      
+      # Refresh grid data
+      proxy <- DT::dataTableProxy("sample_grid")
+      DT::replaceData(
+        proxy = proxy,
+        data = grid_data,
+        resetPaging = FALSE,
+        rownames = FALSE
+      )
+      
+      # Restore selection after a brief delay, using flag to prevent observer trigger
+      shinyjs::delay(50, {
+        programmatic_selection(TRUE)
+        DT::selectRows(proxy, current_idx)
+        shinyjs::delay(10, {
+          programmatic_selection(FALSE)
+        })
+      })
+    }, priority = 10)
+    
+    # Handle excluded checkbox
+    observeEvent(input$mark_excluded, {
+      req(selected_sample())
+      
+      # Update the data
+      app_data$processed_data$samples[[selected_sample()]]$excluded <- input$mark_excluded
+      
+      # Get current selection index before replacing data
+      grid_data <- isolate(sample_grid_data())
+      current_idx <- which(grid_data$sample_id == selected_sample())
+      
+      # Refresh grid data
+      proxy <- DT::dataTableProxy("sample_grid")
+      DT::replaceData(
+        proxy = proxy,
+        data = grid_data,
+        resetPaging = FALSE,
+        rownames = FALSE
+      )
+      
+      # Restore selection after a brief delay, using flag to prevent observer trigger
+      shinyjs::delay(50, {
+        programmatic_selection(TRUE)
+        DT::selectRows(proxy, current_idx)
+        shinyjs::delay(10, {
+          programmatic_selection(FALSE)
+        })
+      })
+    }, priority = 10)
+    
+    # Navigate to previous sample
+    observeEvent(input$prev_sample, {
+      req(selected_sample())
+      
+      grid_data <- sample_grid_data()
+      current_idx <- which(grid_data$sample_id == selected_sample())
+      
+      if (current_idx > 1) {
+        new_idx <- current_idx - 1
+        new_sample <- grid_data$sample_id[new_idx]
+        selected_sample(new_sample)
+        
+        # Update grid selection with flag to prevent observer trigger
+        proxy <- DT::dataTableProxy("sample_grid")
+        programmatic_selection(TRUE)
+        DT::selectRows(proxy, new_idx)
+        shinyjs::delay(10, {
+          programmatic_selection(FALSE)
+        })
+      }
+    })
+    
+    # Navigate to next sample
+    observeEvent(input$next_sample, {
+      req(selected_sample())
+      
+      grid_data <- sample_grid_data()
+      current_idx <- which(grid_data$sample_id == selected_sample())
+      
+      if (current_idx < nrow(grid_data)) {
+        new_idx <- current_idx + 1
+        new_sample <- grid_data$sample_id[new_idx]
+        selected_sample(new_sample)
+        
+        # Update grid selection with flag to prevent observer trigger
+        proxy <- DT::dataTableProxy("sample_grid")
+        programmatic_selection(TRUE)
+        DT::selectRows(proxy, new_idx)
+        shinyjs::delay(10, {
+          programmatic_selection(FALSE)
+        })
+      }
+    })
+    
+    # Save processed data (placeholder)
+    observeEvent(input$save_btn, {
+      showModal(
+        modalDialog(
+          title = "Save Processed Data",
+          "Save functionality will be implemented in Phase 7 (Data Management).",
+          easyClose = TRUE,
+          footer = modalButton("Close")
+        )
+      )
+    })
   })
 }

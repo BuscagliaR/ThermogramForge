@@ -519,11 +519,10 @@ mod_data_overview_server <- function(id, app_data) {
     
     # Navigate to review tab
     observeEvent(input$goto_review, {
-      updateNavbarPage(
-        inputId = "main_navbar",
-        selected = "review_endpoints"
-      )
       removeModal()
+      
+      # Signal to parent app to navigate
+      app_data$navigate_to <- "review_endpoints"
     })
     
     # Render uploaded files list
