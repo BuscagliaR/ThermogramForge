@@ -106,11 +106,15 @@ mod_data_overview_ui <- function(id) {
             "Upload CSV or Excel files containing thermogram data. ",
             "Files should contain Temperature and dCp columns."
           ),
-          actionButton(
-            ns("upload_btn"),
-            "Upload New Raw Thermogram Data",
-            icon = icon("upload"),
-            class = "btn-primary btn-lg"
+          div(
+            class = "d-flex gap-2",
+            actionButton(
+              ns("upload_btn"),
+              "Upload New Raw Thermogram Data",
+              icon = icon("upload"),
+              class = "btn-primary btn-lg"
+            ),
+            uiOutput(ns("process_button_ui"))
           )
         )
       ),
@@ -154,8 +158,7 @@ mod_data_overview_server <- function(id, app_data) {
       if (is.null(app_data$processed_data)) {
         "0"
       } else {
-        # TODO: Count processed samples properly
-        "0"
+        as.character(app_data$processed_data$summary$n_success)
       }
     })
     
@@ -399,6 +402,127 @@ mod_data_overview_server <- function(id, app_data) {
     
     # Cancel upload
     observeEvent(input$cancel_upload, {
+      removeModal()
+    })
+    
+    # Show process button when data is available
+    output$process_button_ui <- renderUI({
+      req(app_data$raw_data)
+      
+      actionButton(
+        ns("process_btn"),
+        "Process Data",
+        icon = icon("cogs"),
+        class = "btn-success btn-lg"
+      )
+    })
+    
+    # Process data button handler
+    observeEvent(input$process_btn, {
+      req(app_data$raw_data)
+      
+      # Get the most recent uploaded file
+      files <- uploaded_files()
+      if (length(files) == 0) return()
+      
+      recent_file <- files[[length(files)]]
+      
+      # Show simple processing modal
+      showModal(
+        modalDialog(
+          title = tagList(icon("cogs"), " Processing Thermogram Data"),
+          size = "m",
+          easyClose = FALSE,
+          footer = NULL,
+          
+          div(
+            class = "text-center",
+            h5("Running baseline detection and signal quality assessment..."),
+            br(),
+            div(
+              class = "spinner-border text-primary",
+              role = "status",
+              style = "width: 3rem; height: 3rem;",
+              tags$span(class = "visually-hidden", "Processing...")
+            ),
+            br(), br(),
+            p(class = "text-muted", "This may take a moment for large datasets.")
+          )
+        )
+      )
+      
+      # Small delay to allow modal to render
+      Sys.sleep(0.1)
+      
+      # Run processing (blocking)
+      result <- process_thermogram_data(
+        recent_file$data,
+        recent_file$format_info,
+        progress_callback = NULL
+      )
+      
+      # Store results
+      app_data$processed_data <- result
+      app_data$baseline_results <- result$samples
+      
+      # Calculate signal detection summary
+      signal_summary <- list()
+      for (sample_id in names(result$samples)) {
+        sample <- result$samples[[sample_id]]
+        if (sample$success) {
+          signal_summary[[sample_id]] <- sample$has_signal
+        }
+      }
+      app_data$signal_detection <- signal_summary
+      
+      # Close processing modal
+      removeModal()
+      
+      # Show success modal
+      showModal(
+        modalDialog(
+          title = tagList(icon("check-circle", class = "text-success"), " Processing Complete"),
+          size = "m",
+          easyClose = TRUE,
+          
+          div(
+            class = "alert alert-success",
+            h5("Successfully processed thermogram data!"),
+            tags$hr(),
+            tags$ul(
+              tags$li(sprintf("Total samples: %d", result$summary$n_total)),
+              tags$li(sprintf("Successfully processed: %d", result$summary$n_success)),
+              tags$li(sprintf("Failed: %d", result$summary$n_failed)),
+              tags$li(
+                sprintf("With signal: %d", result$summary$n_signal),
+                tags$small(class = "text-muted ms-2", "(good quality)")
+              ),
+              tags$li(
+                sprintf("No signal detected: %d", result$summary$n_no_signal),
+                tags$small(class = "text-warning ms-2", "(noise only)")
+              )
+            )
+          ),
+          
+          footer = tagList(
+            actionButton(
+              ns("goto_review"),
+              "Go to Review Endpoints",
+              icon = icon("arrow-right"),
+              class = "btn-primary"
+            ),
+            modalButton("Close")
+          )
+        )
+      )
+    })
+    
+    # Navigate to review tab
+    observeEvent(input$goto_review, {
+      updateNavbarPage(
+        inputId = "main_navbar",
+        selected = "review_endpoints"
+      )
       removeModal()
     })
     

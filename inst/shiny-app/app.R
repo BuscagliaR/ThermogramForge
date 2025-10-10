@@ -15,6 +15,7 @@ library(readxl)
 # Source utility files
 source("utils/theme.R")
 source("utils/data_utils.R")
+source("utils/processing_utils.R")
 
 # Source module files
 source("modules/mod_data_overview.R")

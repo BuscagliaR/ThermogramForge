@@ -125,7 +125,11 @@ custom_css <- function() {
   /* Spacing utilities */
   .mt-3 { margin-top: 1rem !important; }
   .mb-3 { margin-bottom: 1rem !important; }
+  .ms-2 { margin-left: 0.5rem !important; }
   .p-3 { padding: 1rem !important; }
+  .d-flex { display: flex !important; }
+  .gap-2 > * + * { margin-left: 0.5rem; }
+  .text-center { text-align: center; }
   
   /* Custom alert styling */
   .alert {
@@ -134,6 +138,33 @@ custom_css <- function() {
   }
   
   /* Loading spinner */
+  .spinner-border {
+    display: inline-block;
+    width: 2rem;
+    height: 2rem;
+    vertical-align: text-bottom;
+    border: 0.25em solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spinner-border 0.75s linear infinite;
+  }
+  
+  @keyframes spinner-border {
+    to { transform: rotate(360deg); }
+  }
+  
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border: 0;
+  }
+  
   .shiny-busy-panel {
     position: fixed;
     top: 50%;

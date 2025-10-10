@@ -1,6 +1,34 @@
 # ThermogramForge 0.1.0 (Development)
 
-## Phase 2: Data Loading and Validation (Current)
+## Phase 3: Baseline Detection and Signal Quality (Current)
+
+### Features
+* Integrated ThermogramBaseline package for automated baseline detection
+* Real `auto.baseline()` function with spline fitting and endpoint detection
+* Real `signal.detection()` function using ARIMA-based stationarity testing
+* Batch processing for all samples in uploaded dataset
+* Processing results storage for use in Review Interface
+* Summary statistics display (total, success, signal quality counts)
+* "Process Data" button appears after successful upload
+* Processing modal with visual feedback
+
+### Technical Implementation
+* Created processing_utils.R with ThermogramBaseline wrappers
+* Baseline detection using rolling variance for endpoint selection
+* Signal detection classifies samples as "Signal" or "No Signal"
+* Results stored in app_data reactive values
+* Processed sample count updates dynamically
+
+### Known Issues
+* Processing can be slow for large datasets (>50 samples)
+* Progress feedback limited to spinner (async processing in Phase 9)
+
+### Testing
+* Verified with 2-sample dataset (SuperSmall.csv)
+* Confirmed real baseline detection working
+* Signal quality classification functional
+
+## Phase 2: Data Loading and Validation (Complete)
 
 ### Features
 * File upload modal with drag-and-drop interface
