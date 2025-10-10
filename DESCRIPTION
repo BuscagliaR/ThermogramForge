@@ -2,7 +2,7 @@ Package: ThermogramForge
 Title: Interactive Thermal Liquid Biopsy Thermogram Analysis
 Version: 0.1.0
 Authors@R: 
-    person("Chris", "Reger", , "christopher.reger@nau.edu", role = c("aut", "cre"),
+    person("Chris", "Reger", , "kcr28@nau.edu", role = c("aut", "cre"),
            comment = c(ORCID = "0009-0007-4312-7844"))
 Description: An R Shiny web application for analyzing thermal liquid biopsy (TLB) 
     thermogram data. Provides interactive baseline endpoint detection and adjustment,
@@ -32,9 +32,6 @@ Imports:
     logger (>= 0.2.0),
     purrr (>= 0.3.0),
     rlang (>= 1.0.0)
-Remotes:
-    BuscagliaR/ThermogramBaseline,
-    BuscagliaR/tlbparam
 Suggests:
     testthat (>= 3.1.0),
     shinytest2 (>= 0.2.0),
