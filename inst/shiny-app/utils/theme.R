@@ -1,0 +1,145 @@
+# Theme utilities for ThermogramForge
+# Maintains visual consistency with Python application
+
+#' Create ThermogramForge bslib theme
+#'
+#' @return A bslib theme object
+thermogram_theme <- function() {
+  bslib::bs_theme(
+    version = 5,
+    
+    # Primary color scheme matching Python app
+    primary = "#0d6efd",
+    secondary = "#6c757d", 
+    success = "#198754",
+    warning = "#ffc107",
+    danger = "#dc3545",
+    info = "#0dcaf0",
+    
+    # Background colors
+    bg = "#ffffff",
+    fg = "#212529",
+    
+    # Typography
+    base_font = bslib::font_google("Inter"),
+    heading_font = bslib::font_google("Inter"),
+    code_font = bslib::font_google("Roboto Mono"),
+    
+    # Font sizes
+    "font-size-base" = "0.95rem",
+    
+    # Border radius
+    "border-radius" = "0.375rem",
+    
+    # Spacing
+    spacer = "1rem"
+  )
+}
+
+#' Get custom CSS for ThermogramForge
+#'
+#' @return Character string of CSS
+custom_css <- function() {
+  "
+  /* Global styles */
+  body {
+    background-color: #f8f9fa;
+  }
+  
+  /* Navbar styling */
+  .navbar {
+    background-color: #ffffff !important;
+    border-bottom: 1px solid #dee2e6;
+    box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+  }
+  
+  .navbar-brand {
+    font-weight: 600;
+    font-size: 1.25rem;
+    color: #0d6efd !important;
+  }
+  
+  /* Card styling */
+  .card {
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+    margin-bottom: 1rem;
+  }
+  
+  .card-header {
+    background-color: #e9ecef;
+    border-bottom: 1px solid #dee2e6;
+    font-weight: 600;
+    padding: 0.75rem 1rem;
+  }
+  
+  .card-body {
+    padding: 1rem;
+  }
+  
+  /* Button styling */
+  .btn {
+    border-radius: 0.375rem;
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+  }
+  
+  .btn-primary {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+  }
+  
+  .btn-primary:hover {
+    background-color: #0b5ed7;
+    border-color: #0a58ca;
+  }
+  
+  /* DataTable styling */
+  .dataTables_wrapper {
+    padding: 0;
+  }
+  
+  table.dataTable tbody tr.selected {
+    background-color: #cfe2ff !important;
+  }
+  
+  table.dataTable tbody tr:hover {
+    background-color: #e3f2fd !important;
+  }
+  
+  /* Plot container */
+  .plotly {
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+  }
+  
+  /* Status badges */
+  .badge {
+    padding: 0.35em 0.65em;
+    font-size: 0.875em;
+    font-weight: 600;
+    border-radius: 0.375rem;
+  }
+  
+  /* Spacing utilities */
+  .mt-3 { margin-top: 1rem !important; }
+  .mb-3 { margin-bottom: 1rem !important; }
+  .p-3 { padding: 1rem !important; }
+  
+  /* Custom alert styling */
+  .alert {
+    border-radius: 0.375rem;
+    border: 1px solid transparent;
+  }
+  
+  /* Loading spinner */
+  .shiny-busy-panel {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+  }
+  "
+}
