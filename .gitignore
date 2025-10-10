@@ -65,3 +65,6 @@ inst/shiny-app/temp_*
 
 # Test outputs
 tests/testthat/_snaps/
+
+# Raw data
+data-raw/

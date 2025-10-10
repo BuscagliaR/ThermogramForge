@@ -9,12 +9,17 @@ library(shinyjs)
 library(DT)
 library(plotly)
 library(dplyr)
+library(readr)
+library(readxl)
+
+# Source utility files
+source("utils/theme.R")
+source("utils/data_utils.R")
 
 # Source module files
 source("modules/mod_data_overview.R")
 source("modules/mod_review_endpoints.R")
 source("modules/mod_report_builder.R")
-source("utils/theme.R")
 
 # Define UI
 ui <- page_navbar(
@@ -53,20 +58,14 @@ ui <- page_navbar(
     icon = icon("file-export"),
     value = "report_builder",
     mod_report_builder_ui("report_builder")
-  ),
-  
-  # Footer with version info
-  nav_spacer(),
-  nav_item(
-    tags$span(
-      style = "color: #6c757d; font-size: 0.875rem; padding: 0.5rem;",
-      paste0("v", utils::packageVersion("ThermogramForge"))
-    )
   )
 )
 
 # Define Server
 server <- function(input, output, session) {
+  
+  # Increase upload size limit to 150MB
+  options(shiny.maxRequestSize = 150 * 1024^2)
   
   # Initialize reactive values for cross-module communication
   app_data <- reactiveValues(
