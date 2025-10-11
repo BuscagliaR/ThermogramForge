@@ -4,7 +4,8 @@
 #' Detect baseline endpoints and perform subtraction
 #' 
 #' @description
-#' Wrapper for ThermogramBaseline::auto.baseline()
+#' Detects baseline endpoints using ThermogramBaseline::endpoint.detection(),
+#' then performs baseline subtraction and interpolation
 #' 
 #' @param temperature Numeric vector of temperature values
 #' @param dcp Numeric vector of dCp values  
@@ -34,28 +35,130 @@ detect_baseline <- function(temperature, dcp, w = 90,
   )
   
   tryCatch({
-    # Call ThermogramBaseline::auto.baseline()
-    result <- ThermogramBaseline::auto.baseline(
+    # First, detect the endpoints to get actual values
+    endpoints <- ThermogramBaseline::endpoint.detection(
       x = input_data,
       w = w,
       exclusion.lwr = exclusion_lwr,
       exclusion.upr = exclusion_upr,
-      grid.temp = seq(45, 90, 0.1),
-      plot.on = FALSE,
-      point = point,
-      explicit = FALSE
+      point.selection = point,
+      explicit = FALSE  # Suppress console output
     )
     
-    # Extract endpoint information
-    # Note: We need to get endpoints from the function's internal calculations
-    # For now, use the exclusion boundaries as proxies
+    # Extract the detected endpoint temperatures
+    lower_endpoint <- endpoints$lower
+    upper_endpoint <- endpoints$upper
+    
+    # Now perform baseline subtraction with detected endpoints
+    baseline_result <- ThermogramBaseline::baseline.subtraction.byhand(
+      x = input_data,
+      lwr.temp = lower_endpoint,
+      upr.temp = upper_endpoint,
+      plot.on = FALSE
+    )
+    
+    # Interpolate to standard grid
+    final_result <- ThermogramBaseline::final.sample.interpolate(
+      x = baseline_result,
+      grid.temp = seq(45, 90, 0.1),
+      plot.on = FALSE
+    )
+    
+    # Return results with actual detected endpoints
     list(
       success = TRUE,
-      lower_endpoint = exclusion_lwr,
-      upper_endpoint = exclusion_upr,
-      baseline_subtracted = result$dCp,
-      temperature = result$Temperature,
-      result = result
+      lower_endpoint = lower_endpoint,
+      upper_endpoint = upper_endpoint,
+      baseline_subtracted = final_result$dCp,
+      temperature = final_result$Temperature,
+      endpoints_obj = endpoints,
+      baseline_obj = baseline_result
+    )
+    
+  }, error = function(e) {
+    list(
+      success = FALSE,
+      error = as.character(e)
+    )
+  })
+}
+
+#' Re-process sample with manually specified endpoints
+#' 
+#' @description
+#' Performs baseline subtraction using user-specified endpoint temperatures.
+#' Used for manual endpoint adjustment.
+#' 
+#' @param temperature Numeric vector of temperature values
+#' @param dcp Numeric vector of dCp values
+#' @param lower_endpoint Numeric, manually specified lower endpoint (°C)
+#' @param upper_endpoint Numeric, manually specified upper endpoint (°C)
+#' 
+#' @return List with baseline subtraction results
+reprocess_with_manual_endpoints <- function(temperature, dcp, 
+                                            lower_endpoint, 
+                                            upper_endpoint) {
+  
+  # Remove NA values and create input data frame
+  valid_idx <- !is.na(temperature) & !is.na(dcp)
+  
+  if (sum(valid_idx) < 10) {
+    return(list(
+      success = FALSE,
+      error = "Insufficient data points"
+    ))
+  }
+  
+  # Validate endpoints
+  if (lower_endpoint >= upper_endpoint) {
+    return(list(
+      success = FALSE,
+      error = "Lower endpoint must be less than upper endpoint"
+    ))
+  }
+  
+  input_data <- data.frame(
+    Temperature = temperature[valid_idx],
+    dCp = dcp[valid_idx]
+  )
+  
+  # Check that endpoints are within data range
+  temp_range <- range(input_data$Temperature)
+  if (lower_endpoint < temp_range[1] || upper_endpoint > temp_range[2]) {
+    return(list(
+      success = FALSE,
+      error = sprintf(
+        "Endpoints (%.1f, %.1f) outside data range (%.1f, %.1f)",
+        lower_endpoint, upper_endpoint, temp_range[1], temp_range[2]
+      )
+    ))
+  }
+  
+  tryCatch({
+    # Perform baseline subtraction with manual endpoints
+    baseline_result <- ThermogramBaseline::baseline.subtraction.byhand(
+      x = input_data,
+      lwr.temp = lower_endpoint,
+      upr.temp = upper_endpoint,
+      plot.on = FALSE
+    )
+    
+    # Interpolate to standard grid
+    final_result <- ThermogramBaseline::final.sample.interpolate(
+      x = baseline_result,
+      grid.temp = seq(45, 90, 0.1),
+      plot.on = FALSE
+    )
+    
+    # Return results
+    list(
+      success = TRUE,
+      lower_endpoint = lower_endpoint,
+      upper_endpoint = upper_endpoint,
+      baseline_subtracted = final_result$dCp,
+      temperature = final_result$Temperature,
+      baseline_obj = baseline_result,
+      manual = TRUE
     )
     
   }, error = function(e) {
@@ -155,7 +258,10 @@ process_single_sample <- function(temperature, dcp, sample_id) {
       signal_reason = signal_result$reason,
       reviewed = FALSE,
       excluded = FALSE,
-      manual_adjustment = FALSE
+      manual_adjustment = FALSE,
+      # Store original auto-detected endpoints for undo
+      auto_lower_endpoint = baseline_result$lower_endpoint,
+      auto_upper_endpoint = baseline_result$upper_endpoint
     )
     
   }, error = function(e) {

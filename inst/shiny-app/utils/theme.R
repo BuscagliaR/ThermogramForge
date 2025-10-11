@@ -127,11 +127,45 @@ custom_css <- function() {
     border-radius: 0.375rem;
   }
   
+  /* Layout utilities */
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    margin-right: -0.75rem;
+    margin-left: -0.75rem;
+  }
+  
+  .col-6 {
+    flex: 0 0 auto;
+    width: 50%;
+    padding-right: 0.75rem;
+    padding-left: 0.75rem;
+  }
+  
+  .col-md-5 {
+    flex: 0 0 auto;
+    width: 41.66667%;
+  }
+  
+  .col-md-6 {
+    flex: 0 0 auto;
+    width: 50%;
+  }
+  
+  .col-md-7 {
+    flex: 0 0 auto;
+    width: 58.33333%;
+  }
+  
   /* Spacing utilities */
   .mt-3 { margin-top: 1rem !important; }
+  .mb-2 { margin-bottom: 0.5rem !important; }
   .mb-3 { margin-bottom: 1rem !important; }
   .ms-2 { margin-left: 0.5rem !important; }
+  .me-1 { margin-right: 0.25rem !important; }
+  .p-2 { padding: 0.5rem !important; }
   .p-3 { padding: 1rem !important; }
+  .w-100 { width: 100% !important; }
   .d-flex { display: flex !important; }
   .gap-2 > * + * { margin-left: 0.5rem; }
   .justify-content-between { justify-content: space-between !important; }
@@ -155,6 +189,37 @@ custom_css <- function() {
   .bg-warning {
     background-color: #ffc107 !important;
     color: #000 !important;
+  }
+  
+  .bg-success {
+    background-color: #198754 !important;
+    color: #fff !important;
+  }
+  
+  /* Button group styling */
+  .btn-group {
+    display: inline-flex;
+    vertical-align: middle;
+  }
+  
+  .btn-group .btn {
+    position: relative;
+    border-radius: 0;
+  }
+  
+  .btn-group .btn:first-child {
+    border-top-left-radius: 0.375rem;
+    border-bottom-left-radius: 0.375rem;
+  }
+  
+  .btn-group .btn:last-child {
+    border-top-right-radius: 0.375rem;
+    border-bottom-right-radius: 0.375rem;
+  }
+  
+  .btn-group-sm .btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
   }
   
   /* DataTable row styling - very specific selectors to override defaults */
