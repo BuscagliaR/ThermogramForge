@@ -1,5 +1,6 @@
 # ThermogramForge Shiny Application
 # Main application file
+# COMPLETE FILE WITH DATASET RELOAD BUG FIX
 
 # Load required packages
 library(shiny)
@@ -72,14 +73,29 @@ server <- function(input, output, session) {
   
   # Initialize reactive values for cross-module communication
   app_data <- reactiveValues(
+    # Phase 2-3: Data loading and processing
     raw_data = NULL,
     processed_data = NULL,
     baseline_results = NULL,
     signal_detection = NULL,
+    
+    # Phase 4-6: Review Endpoints
     current_sample = NULL,
     review_status = list(),
     undo_stack = list(),
-    redo_stack = list()
+    redo_stack = list(),
+    
+    # ===== ADDED FOR BUG FIX - Phase 7-8: Dataset tracking =====
+    current_dataset_id = NULL,      # Unique ID of active dataset
+    current_dataset_name = NULL,    # Filename of active dataset
+    dataset_load_trigger = 0,       # Increment to trigger reload in modules
+    # ===========================================================
+    
+    # Phase 8: Report Builder
+    generated_reports = list(),
+    
+    # Navigation
+    navigate_to = NULL
   )
   
   # Call module servers

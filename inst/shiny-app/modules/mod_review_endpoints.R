@@ -42,9 +42,9 @@ mod_review_endpoints_server <- function(id, app_data) {
     last_reviewed_value <- reactiveVal(NULL)
     last_excluded_value <- reactiveVal(NULL)
     updating_from_checkbox <- reactiveVal(FALSE)
-    
-    # FIXED: Add flag to prevent button re-firing during updates
     processing_adjustment <- reactiveVal(FALSE)
+    
+    ui_refresh_trigger <- reactiveVal(0)
     
     # =========================================================================
     # HELPER FUNCTIONS
@@ -143,6 +143,69 @@ mod_review_endpoints_server <- function(id, app_data) {
     }
     
     # =========================================================================
+    # DATASET RELOAD OBSERVER (FIX FOR DATASET SWITCHING BUG)
+    # =========================================================================
+    
+    observeEvent(app_data$dataset_load_trigger, {
+      
+      req(app_data$dataset_load_trigger > 0)
+      
+      cat(sprintf("\n[REVIEW_ENDPOINTS] Dataset reload triggered (trigger=%d)\n", 
+                  app_data$dataset_load_trigger))
+      cat(sprintf("[REVIEW_ENDPOINTS] Loading dataset: %s\n", 
+                  app_data$current_dataset_name))
+      
+      if (is.null(app_data$processed_data)) {
+        cat("[REVIEW_ENDPOINTS] WARNING: No processed data available\n")
+        return()
+      }
+      
+      # Reset module state for new dataset
+      cat("[REVIEW_ENDPOINTS] Resetting module state for new dataset\n")
+      
+      # Clear selection
+      selected_sample(NULL)
+      
+      # Clear undo/redo stacks
+      app_data$undo_stack <- list()
+      app_data$redo_stack <- list()
+      
+      # Reset flags
+      adjustment_mode(NULL)
+      last_click_key(NULL)
+      last_reviewed_value(NULL)
+      last_excluded_value(NULL)
+      plot_view("baseline_subtracted")
+      
+      # Reset boolean flags
+      programmatic_selection(FALSE)
+      updating_checkboxes(FALSE)
+      updating_from_checkbox(FALSE)
+      processing_adjustment(FALSE)
+      
+      # Log successful reload
+      cat(sprintf("[REVIEW_ENDPOINTS] Dataset '%s' loaded successfully\n", 
+                  app_data$current_dataset_name))
+      cat(sprintf("[REVIEW_ENDPOINTS] Samples available: %d\n", 
+                  length(app_data$processed_data$samples)))
+      
+      # Show notification to user
+      showNotification(
+        sprintf("Loaded dataset: %s (%d samples)", 
+                app_data$current_dataset_name,
+                length(app_data$processed_data$samples)),
+        type = "message",
+        duration = 3
+      )
+      
+      # Force UI refresh by incrementing trigger
+      ui_refresh_trigger(isolate(ui_refresh_trigger()) + 1)
+      cat("[REVIEW_ENDPOINTS] UI refresh triggered\n")
+      
+    }, ignoreInit = TRUE, priority = 100)
+    
+    
+    # =========================================================================
     # MAIN CONTENT RENDERING
     # =========================================================================
     
@@ -163,6 +226,10 @@ mod_review_endpoints_server <- function(id, app_data) {
           )
         )
       }
+      
+      # ===== ADDED FOR BUG FIX - Force UI refresh when dataset changes =====
+      ui_refresh_trigger()  # Depend on the trigger to force refresh
+      # ======================================================================
       
       tagList(
         div(
@@ -304,7 +371,13 @@ mod_review_endpoints_server <- function(id, app_data) {
     })
     
     output$sample_grid <- DT::renderDataTable({
-      grid_data <- isolate(sample_grid_data())
+      req(app_data$processed_data)
+      
+      # ===== ADDED FOR BUG FIX =====
+      ui_refresh_trigger()  # Force grid refresh when dataset changes
+      # =============================
+      
+      grid_data <- sample_grid_data()  # REMOVED isolate() wrapper
       
       DT::datatable(
         grid_data,
@@ -529,7 +602,10 @@ mod_review_endpoints_server <- function(id, app_data) {
                  ))
       }
       
-      p <- plotly::plot_ly(source = "thermogram_plot") %>%
+      p <- plotly::plot_ly(source = "thermogram_plot")
+      p <- plotly::event_register(p, 'plotly_click')  # Register event EARLY
+      
+      p <- p %>%
         plotly::add_trace(
           x = x_data,
           y = y_data,
