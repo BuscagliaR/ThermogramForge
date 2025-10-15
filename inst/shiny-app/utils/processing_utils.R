@@ -1,5 +1,5 @@
 # Processing Utilities for ThermogramForge
-# Baseline detection and signal quality assessment
+# Baseline detection, signal quality assessment, and data management
 
 #' Detect baseline endpoints and perform subtraction
 #' 
@@ -314,7 +314,7 @@ process_wide_format <- function(data, format_info, progress_callback = NULL) {
     # Process sample
     results[[i]] <- process_single_sample(temperature, dcp, sample_id)
     
-    # Small delay to show progress (remove in production)
+    # Small delay to show progress
     Sys.sleep(0.01)
   }
   
@@ -418,5 +418,330 @@ process_thermogram_data <- function(data, format_info, progress_callback = NULL)
     ),
     format_info = format_info,
     processing_time = Sys.time()
+  )
+}
+
+# =============================================================================
+# PHASE 7: DATA MANAGEMENT FUNCTIONS
+# =============================================================================
+
+#' Convert processed data to wide format for export
+#' 
+#' @description
+#' Converts processed thermogram data to wide format matching Python implementation:
+#' - Temperature values as column headers
+#' - Sample IDs as row index
+#' - Baseline-subtracted dCp values as data
+#' - Common interpolated temperature grid
+#' 
+#' @param data Processed data list from app_data$processed_data
+#' 
+#' @return Data frame in wide format with SampleID column
+format_data_for_wide_export <- function(data) {
+  
+  if (is.null(data$samples) || length(data$samples) == 0) {
+    return(data.frame())
+  }
+  
+  # Get all successful samples
+  successful_samples <- Filter(function(x) x$success, data$samples)
+  
+  if (length(successful_samples) == 0) {
+    return(data.frame())
+  }
+  
+  # Use the temperature grid from the first successful sample
+  # All samples should have the same grid after interpolation
+  temp_grid <- successful_samples[[1]]$temperature
+  n_temps <- length(temp_grid)
+  
+  # Create matrix to hold all sample data
+  sample_ids <- names(successful_samples)
+  n_samples <- length(sample_ids)
+  
+  # Initialize matrix: rows = samples, cols = temperatures
+  data_matrix <- matrix(NA, nrow = n_samples, ncol = n_temps)
+  
+  # Fill matrix with baseline-subtracted data
+  for (i in seq_along(sample_ids)) {
+    sample_id <- sample_ids[i]
+    sample <- successful_samples[[sample_id]]
+    
+    # Verify temperature grid matches
+    if (length(sample$temperature) == n_temps &&
+        all(abs(sample$temperature - temp_grid) < 0.01)) {
+      data_matrix[i, ] <- sample$baseline_subtracted
+    } else {
+      warning(sprintf("Sample %s has mismatched temperature grid, filling with NA", sample_id))
+    }
+  }
+  
+  # Convert to data frame with check.names = FALSE to preserve numeric column names
+  df_wide <- as.data.frame(data_matrix, stringsAsFactors = FALSE, check.names = FALSE)
+  
+  # Set column names as temperature values (formatted to 1 decimal)
+  colnames(df_wide) <- sprintf("%.1f", temp_grid)
+  
+  # Add SampleID as first column
+  df_wide <- data.frame(
+    SampleID = sample_ids,
+    df_wide,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  
+  # Apply edge column adjustment (matching Python implementation)
+  if (ncol(df_wide) > 3) {  # Need at least SampleID + 2 temp columns
+    # Column indices: col 2 is first temp, col 3 is second temp
+    # col ncol-1 is second-to-last temp, col ncol is last temp
+    second_temp_col <- df_wide[[3]]
+    second_last_temp_col <- df_wide[[ncol(df_wide) - 1]]
+    
+    df_wide[[2]] <- 0.5 * second_temp_col
+    df_wide[[ncol(df_wide)]] <- 0.5 * second_last_temp_col
+  }
+  
+  df_wide
+}
+
+#' Save processed thermogram data
+#' 
+#' @description
+#' Saves processed data in RDS, CSV, or Excel format
+#' 
+#' @param data Processed data list from app_data$processed_data
+#' @param filename Base filename (without extension)
+#' @param format One of "rds", "csv", or "xlsx"
+#' @param output_dir Output directory (default: "data/processed")
+#' 
+#' @return List with success, filepath, and message
+save_processed_data <- function(data, filename, format = "rds", 
+                                output_dir = "data/processed") {
+  
+  # Validate inputs
+  if (is.null(data) || !is.list(data)) {
+    return(list(
+      success = FALSE,
+      message = "Invalid data: must be a list"
+    ))
+  }
+  
+  if (!format %in% c("rds", "csv", "xlsx")) {
+    return(list(
+      success = FALSE,
+      message = "Invalid format: must be 'rds', 'csv', or 'xlsx'"
+    ))
+  }
+  
+  # Create output directory
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+  }
+  
+  # Build metadata
+  metadata <- list(
+    saved_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+    filename = filename,
+    n_samples = length(data$samples),
+    n_reviewed = sum(sapply(data$samples, function(s) isTRUE(s$reviewed))),
+    n_excluded = sum(sapply(data$samples, function(s) isTRUE(s$excluded))),
+    n_manual = sum(sapply(data$samples, function(s) isTRUE(s$manual_adjustment))),
+    version = "0.1.0",
+    format = format
+  )
+  
+  tryCatch({
+    if (format == "rds") {
+      # RDS: Save full R object with metadata
+      filepath <- file.path(output_dir, paste0(filename, ".rds"))
+      save_obj <- list(
+        metadata = metadata,
+        data = data
+      )
+      saveRDS(save_obj, filepath)
+      
+      return(list(
+        success = TRUE,
+        filepath = filepath,
+        message = sprintf("Saved as RDS: %s", basename(filepath))
+      ))
+      
+    } else if (format == "csv") {
+      # CSV: Wide format with interpolated data
+      wide_data <- format_data_for_wide_export(data)
+      
+      if (nrow(wide_data) == 0) {
+        return(list(
+          success = FALSE,
+          message = "No data to export"
+        ))
+      }
+      
+      filepath <- file.path(output_dir, paste0(filename, ".csv"))
+      readr::write_csv(wide_data, filepath)
+      
+      # Save metadata separately
+      meta_filepath <- file.path(output_dir, paste0(filename, "_metadata.txt"))
+      writeLines(
+        c(
+          paste("Saved:", metadata$saved_at),
+          paste("Samples:", metadata$n_samples),
+          paste("Reviewed:", metadata$n_reviewed),
+          paste("Excluded:", metadata$n_excluded),
+          paste("Manual Adjustments:", metadata$n_manual),
+          paste("Version:", metadata$version)
+        ),
+        meta_filepath
+      )
+      
+      return(list(
+        success = TRUE,
+        filepath = filepath,
+        message = sprintf("Saved as CSV: %s (with metadata file)", basename(filepath))
+      ))
+      
+    } else if (format == "xlsx") {
+      # Excel: Wide format + metadata sheet
+      wide_data <- format_data_for_wide_export(data)
+      
+      if (nrow(wide_data) == 0) {
+        return(list(
+          success = FALSE,
+          message = "No data to export"
+        ))
+      }
+      
+      filepath <- file.path(output_dir, paste0(filename, ".xlsx"))
+      
+      # Metadata sheet
+      metadata_sheet <- data.frame(
+        Property = c("Saved At", "Samples", "Reviewed", "Excluded", 
+                     "Manual Adjustments", "Version"),
+        Value = c(metadata$saved_at, metadata$n_samples, metadata$n_reviewed,
+                  metadata$n_excluded, metadata$n_manual, metadata$version),
+        stringsAsFactors = FALSE
+      )
+      
+      # Write to Excel with multiple sheets
+      writexl::write_xlsx(
+        list(
+          Data = wide_data,
+          Metadata = metadata_sheet
+        ),
+        path = filepath
+      )
+      
+      return(list(
+        success = TRUE,
+        filepath = filepath,
+        message = sprintf("Saved as Excel: %s", basename(filepath))
+      ))
+    }
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      message = sprintf("Save failed: %s", e$message)
+    ))
+  })
+}
+
+#' Load processed thermogram data
+#' 
+#' @description
+#' Loads processed data from RDS format (CSV/Excel not supported for loading)
+#' 
+#' @param filepath Full path to saved RDS file
+#' 
+#' @return List with success, data, metadata, and message
+load_processed_data <- function(filepath) {
+  
+  if (!file.exists(filepath)) {
+    return(list(
+      success = FALSE,
+      message = sprintf("File not found: %s", filepath)
+    ))
+  }
+  
+  ext <- tolower(tools::file_ext(filepath))
+  
+  if (ext != "rds") {
+    return(list(
+      success = FALSE,
+      message = "Only RDS format can be loaded. CSV/Excel are export-only formats."
+    ))
+  }
+  
+  tryCatch({
+    loaded <- readRDS(filepath)
+    
+    # Validate structure
+    if (!is.list(loaded) || !all(c("metadata", "data") %in% names(loaded))) {
+      return(list(
+        success = FALSE,
+        message = "Invalid RDS file structure: missing metadata or data"
+      ))
+    }
+    
+    return(list(
+      success = TRUE,
+      data = loaded$data,
+      metadata = loaded$metadata,
+      message = "Successfully loaded RDS file"
+    ))
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      message = sprintf("Load failed: %s", e$message)
+    ))
+  })
+}
+
+#' List saved processed data files
+#' 
+#' @description
+#' Scans directory for processed data files
+#' 
+#' @param output_dir Directory to scan (default: "data/processed")
+#' 
+#' @return Data frame with file information
+list_saved_datasets <- function(output_dir = "data/processed") {
+  
+  if (!dir.exists(output_dir)) {
+    return(data.frame(
+      filename = character(0),
+      format = character(0),
+      size_mb = numeric(0),
+      modified = character(0),
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  files <- list.files(
+    output_dir,
+    pattern = "\\.(rds|csv|xlsx)$",
+    full.names = TRUE
+  )
+  
+  if (length(files) == 0) {
+    return(data.frame(
+      filename = character(0),
+      format = character(0),
+      size_mb = numeric(0),
+      modified = character(0),
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  file_info <- file.info(files)
+  
+  data.frame(
+    filename = basename(files),
+    format = toupper(tools::file_ext(files)),
+    size_mb = round(file_info$size / 1024^2, 2),
+    modified = format(file_info$mtime, "%Y-%m-%d %H:%M:%S"),
+    filepath = files,
+    stringsAsFactors = FALSE
   )
 }
