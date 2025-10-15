@@ -745,3 +745,311 @@ list_saved_datasets <- function(output_dir = "data/processed") {
     stringsAsFactors = FALSE
   )
 }
+
+# =============================================================================
+# PHASE 7: LOAD/DELETE FUNCTIONALITY
+# =============================================================================
+
+#' Load processed thermogram data
+#' 
+#' @description
+#' Loads processed data from RDS, CSV, or Excel format.
+#' - RDS: Full reload with all sample curves (can use in Review Endpoints + Reports)
+#' - CSV/Excel: Report-ready data only (can generate reports, but no Review Endpoints)
+#' 
+#' @param filepath Full path to saved file
+#' 
+#' @return List with success, data, message, metadata, and format
+load_processed_data <- function(filepath) {
+  
+  # Validate file exists
+  if (!file.exists(filepath)) {
+    return(list(
+      success = FALSE,
+      message = "File not found",
+      format = NULL,
+      data_type = NULL
+    ))
+  }
+  
+  # Detect format from extension
+  ext <- tolower(tools::file_ext(filepath))
+  
+  tryCatch({
+    if (ext == "rds") {
+      # ============================================================
+      # RDS FORMAT - Full reload capability
+      # ============================================================
+      loaded <- readRDS(filepath)
+      
+      # Validate structure
+      if (!is.list(loaded)) {
+        return(list(
+          success = FALSE,
+          message = "Invalid RDS structure: not a list",
+          format = "rds",
+          data_type = NULL
+        ))
+      }
+      
+      if (!all(c("metadata", "data") %in% names(loaded))) {
+        return(list(
+          success = FALSE,
+          message = "Invalid RDS structure: missing 'metadata' or 'data' fields",
+          format = "rds",
+          data_type = NULL
+        ))
+      }
+      
+      # Validate data has required components for full reload
+      if (!all(c("samples", "summary") %in% names(loaded$data))) {
+        return(list(
+          success = FALSE,
+          message = "Invalid data structure: missing 'samples' or 'summary'",
+          format = "rds",
+          data_type = NULL
+        ))
+      }
+      
+      return(list(
+        success = TRUE,
+        data = loaded$data,
+        metadata = loaded$metadata,
+        format = "rds",
+        data_type = "full",  # Full data with all curves
+        message = sprintf(
+          "Loaded %d samples from RDS file (saved %s)",
+          loaded$metadata$n_samples,
+          loaded$metadata$saved_at
+        )
+      ))
+      
+    } else if (ext == "csv") {
+      # ============================================================
+      # CSV FORMAT - Report-ready data only
+      # ============================================================
+      
+      # Read CSV
+      csv_data <- readr::read_csv(filepath, show_col_types = FALSE)
+      
+      # Try to find companion metadata file
+      meta_filepath <- sub("\\.csv$", "_metadata.txt", filepath)
+      metadata <- list(
+        format = "csv",
+        loaded_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+        note = "CSV file loaded for report generation only"
+      )
+      
+      if (file.exists(meta_filepath)) {
+        meta_lines <- readLines(meta_filepath)
+        metadata$original_metadata <- paste(meta_lines, collapse = "\n")
+      }
+      
+      # Create report-ready structure
+      report_data <- list(
+        wide_data = csv_data,
+        n_samples = nrow(csv_data),
+        format_info = list(
+          format_type = "wide",
+          source = "csv_import"
+        )
+      )
+      
+      return(list(
+        success = TRUE,
+        data = report_data,
+        format = "csv",
+        data_type = "report_only",  # Can only generate reports
+        metadata = metadata,
+        message = sprintf(
+          "Loaded CSV file with %d samples for report generation",
+          nrow(csv_data)
+        )
+      ))
+      
+    } else if (ext %in% c("xlsx", "xls")) {
+      # ============================================================
+      # EXCEL FORMAT - Report-ready data only
+      # ============================================================
+      
+      # Read Excel - check for multiple sheets
+      sheet_names <- readxl::excel_sheets(filepath)
+      
+      # Look for data sheet (usually first or named "Data")
+      data_sheet <- if ("Data" %in% sheet_names) "Data" else sheet_names[1]
+      excel_data <- readxl::read_excel(filepath, sheet = data_sheet)
+      
+      # Try to read metadata sheet if it exists
+      metadata <- list(
+        format = "xlsx",
+        loaded_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+        note = "Excel file loaded for report generation only"
+      )
+      
+      if ("Metadata" %in% sheet_names) {
+        meta_df <- readxl::read_excel(filepath, sheet = "Metadata")
+        metadata$original_metadata <- paste(
+          apply(meta_df, 1, function(row) paste(row, collapse = ": ")),
+          collapse = "\n"
+        )
+      }
+      
+      # Create report-ready structure
+      report_data <- list(
+        wide_data = excel_data,
+        n_samples = nrow(excel_data),
+        format_info = list(
+          format_type = "wide",
+          source = "excel_import"
+        )
+      )
+      
+      return(list(
+        success = TRUE,
+        data = report_data,
+        format = "xlsx",
+        data_type = "report_only",  # Can only generate reports
+        metadata = metadata,
+        message = sprintf(
+          "Loaded Excel file with %d samples for report generation",
+          nrow(excel_data)
+        )
+      ))
+      
+    } else {
+      return(list(
+        success = FALSE,
+        message = sprintf("Unsupported file format: %s", ext),
+        format = ext,
+        data_type = NULL
+      ))
+    }
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      message = sprintf("Error loading file: %s", e$message),
+      format = ext,
+      data_type = NULL
+    ))
+  })
+}
+
+
+#' List saved processed datasets
+#' 
+#' @description
+#' Scans the data/processed directory and returns information about saved files
+#' 
+#' @param output_dir Directory to scan (default: "data/processed")
+#' 
+#' @return Data frame with file information
+list_processed_datasets <- function(output_dir = "data/processed") {
+  
+  # Check if directory exists
+  if (!dir.exists(output_dir)) {
+    return(data.frame(
+      filename = character(0),
+      filepath = character(0),
+      format = character(0),
+      size_mb = numeric(0),
+      modified = character(0),
+      can_load = logical(0),
+      load_type = character(0),
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Find all processed data files
+  all_files <- list.files(
+    output_dir, 
+    pattern = "\\.(rds|csv|xlsx)$", 
+    full.names = TRUE,
+    ignore.case = TRUE
+  )
+  
+  if (length(all_files) == 0) {
+    return(data.frame(
+      filename = character(0),
+      filepath = character(0),
+      format = character(0),
+      size_mb = numeric(0),
+      modified = character(0),
+      can_load = logical(0),
+      load_type = character(0),
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Get file info
+  file_info <- file.info(all_files)
+  
+  # Determine load type for each file
+  load_types <- sapply(all_files, function(f) {
+    ext <- tolower(tools::file_ext(f))
+    if (ext == "rds") {
+      "Full (Review + Reports)"
+    } else {
+      "Reports Only"
+    }
+  })
+  
+  # Build data frame
+  df <- data.frame(
+    filename = basename(all_files),
+    filepath = all_files,
+    format = toupper(tools::file_ext(all_files)),
+    size_mb = round(file_info$size / 1024^2, 2),
+    modified = format(file_info$mtime, "%Y-%m-%d %H:%M:%S"),
+    can_load = TRUE,  # ALL formats can now be loaded
+    load_type = unname(load_types),
+    stringsAsFactors = FALSE
+  )
+  
+  # Sort by modified date (most recent first)
+  df <- df[order(df$modified, decreasing = TRUE), ]
+  rownames(df) <- NULL
+  
+  return(df)
+}
+
+
+#' Delete processed dataset file
+#' 
+#' @description
+#' Safely deletes a processed dataset file and its companion metadata if it exists
+#' 
+#' @param filepath Full path to file to delete
+#' 
+#' @return List with success flag and message
+delete_processed_data <- function(filepath) {
+  
+  if (!file.exists(filepath)) {
+    return(list(
+      success = FALSE,
+      message = "File not found"
+    ))
+  }
+  
+  tryCatch({
+    # Delete main file
+    file.remove(filepath)
+    
+    # Try to delete companion metadata file if it exists
+    meta_filepath <- sub("\\.(rds|csv|xlsx)$", "_metadata.txt", filepath)
+    if (file.exists(meta_filepath)) {
+      file.remove(meta_filepath)
+    }
+    
+    return(list(
+      success = TRUE,
+      message = sprintf("Successfully deleted %s", basename(filepath))
+    ))
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      message = sprintf("Error deleting file: %s", e$message)
+    ))
+  })
+}
