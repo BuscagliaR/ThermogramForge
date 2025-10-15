@@ -244,6 +244,11 @@ process_single_sample <- function(temperature, dcp, sample_id) {
     # Run signal detection
     signal_result <- detect_signal(temperature, dcp)
     
+    # Store original raw data for reprocessing
+    valid_idx <- !is.na(temperature) & !is.na(dcp)
+    original_temp <- temperature[valid_idx]
+    original_dcp <- dcp[valid_idx]
+    
     # Return combined results
     list(
       sample_id = sample_id,
@@ -251,14 +256,17 @@ process_single_sample <- function(temperature, dcp, sample_id) {
       lower_endpoint = baseline_result$lower_endpoint,
       upper_endpoint = baseline_result$upper_endpoint,
       baseline_subtracted = baseline_result$baseline_subtracted,
-      temperature = baseline_result$temperature,
-      dcp_original = dcp[!is.na(temperature) & !is.na(dcp)],
+      temperature = baseline_result$temperature,  # Interpolated grid for plotting
+      dcp_original = original_dcp,  # Original dcp values
+      temperature_original = original_temp,  # Original temperature values
       has_signal = signal_result$has_signal,
       signal_confidence = signal_result$confidence,
       signal_reason = signal_result$reason,
       reviewed = FALSE,
       excluded = FALSE,
       manual_adjustment = FALSE,
+      lower_manual = FALSE,  # Track which endpoint was manually adjusted
+      upper_manual = FALSE,
       # Store original auto-detected endpoints for undo
       auto_lower_endpoint = baseline_result$lower_endpoint,
       auto_upper_endpoint = baseline_result$upper_endpoint

@@ -1,4 +1,4 @@
-# Review Endpoints Module - Complete with Undo/Redo
+# Review Endpoints Module - Final Fixed Version
 # Interactive thermogram review and manual endpoint adjustment with full history tracking
 
 #' Review Endpoints UI
@@ -34,11 +34,45 @@ mod_review_endpoints_server <- function(id, app_data) {
     # Flag to prevent observer triggering during programmatic selection
     programmatic_selection <- reactiveVal(FALSE)
     
-    # Track plot view mode (raw or baseline_subtracted)
-    plot_view <- reactiveVal("raw")
+    # Track plot view mode (raw or baseline_subtracted) - DEFAULT TO BASELINE SUBTRACTED
+    plot_view <- reactiveVal("baseline_subtracted")
     
     # Track endpoint adjustment mode
     adjustment_mode <- reactiveVal(NULL)  # NULL, "lower", or "upper"
+    
+    # Track last processed click to prevent duplicate processing
+    last_click_key <- reactiveVal(NULL)
+    
+    # =============================================================================
+    # DIAGNOSTIC OBSERVERS (Remove after testing)
+    # =============================================================================
+    
+    # Monitor all clicks regardless of mode
+    observe({
+      click <- plotly::event_data("plotly_click", source = "thermogram_plot")
+      
+      if (!is.null(click)) {
+        cat("\n╔═══════════════════════════════════════╗\n")
+        cat("║  PLOTLY CLICK EVENT CAPTURED!        ║\n")
+        cat("╚═══════════════════════════════════════╝\n")
+        cat("  X (Temperature):", click$x, "\n")
+        cat("  Y (Value):", click$y, "\n")
+        cat("  Curve Number:", ifelse(is.null(click$curveNumber), "NULL", click$curveNumber), "\n")
+        cat("  Current adjustment mode:", ifelse(is.null(adjustment_mode()), "NONE", adjustment_mode()), "\n")
+        cat("  Selected sample:", ifelse(is.null(selected_sample()), "NONE", selected_sample()), "\n")
+        cat("─────────────────────────────────────────\n\n")
+      }
+    })
+    
+    # Monitor adjustment mode changes
+    observe({
+      mode <- adjustment_mode()
+      cat("\n[MODE] Adjustment mode changed to:", ifelse(is.null(mode), "OFF", mode), "\n\n")
+    })
+    
+    # =============================================================================
+    # END DIAGNOSTIC OBSERVERS
+    # =============================================================================
     
     # Helper function to push state to undo stack
     push_undo_state <- function(sample_id, action_type, previous_state) {
@@ -65,6 +99,8 @@ mod_review_endpoints_server <- function(id, app_data) {
         upper_endpoint = sample$upper_endpoint,
         baseline_subtracted = sample$baseline_subtracted,
         manual_adjustment = sample$manual_adjustment,
+        lower_manual = if(is.null(sample$lower_manual)) FALSE else sample$lower_manual,
+        upper_manual = if(is.null(sample$upper_manual)) FALSE else sample$upper_manual,
         reviewed = sample$reviewed,
         excluded = sample$excluded
       )
@@ -76,6 +112,8 @@ mod_review_endpoints_server <- function(id, app_data) {
       app_data$processed_data$samples[[sample_id]]$upper_endpoint <- state$upper_endpoint
       app_data$processed_data$samples[[sample_id]]$baseline_subtracted <- state$baseline_subtracted
       app_data$processed_data$samples[[sample_id]]$manual_adjustment <- state$manual_adjustment
+      app_data$processed_data$samples[[sample_id]]$lower_manual <- state$lower_manual
+      app_data$processed_data$samples[[sample_id]]$upper_manual <- state$upper_manual
       app_data$processed_data$samples[[sample_id]]$reviewed <- state$reviewed
       app_data$processed_data$samples[[sample_id]]$excluded <- state$excluded
     }
@@ -266,10 +304,11 @@ mod_review_endpoints_server <- function(id, app_data) {
       grid_df
     })
     
-    # Render sample grid
+    # Render sample grid - NON-REACTIVE initial render
     output$sample_grid <- DT::renderDataTable({
       
-      grid_data <- sample_grid_data()
+      # Use isolate to prevent reactive updates
+      grid_data <- isolate(sample_grid_data())
       
       DT::datatable(
         grid_data,
@@ -414,6 +453,12 @@ mod_review_endpoints_server <- function(id, app_data) {
       plotly::plotlyOutput(ns("thermogram_plot"), height = "400px")
     })
     
+    # Reactive to get plot click data
+    plot_click <- reactive({
+      click_data <- plotly::event_data("plotly_click", source = "thermogram_plot")
+      click_data
+    })
+    
     # Render thermogram plot
     output$thermogram_plot <- plotly::renderPlotly({
       req(selected_sample())
@@ -429,6 +474,7 @@ mod_review_endpoints_server <- function(id, app_data) {
       if (current_view == "baseline_subtracted" && 
           !is.null(sample$baseline_subtracted) && 
           length(sample$baseline_subtracted) > 0) {
+        # Plot baseline-subtracted data (uses interpolated grid)
         temp <- as.numeric(sample$temperature)
         dcp_data <- as.numeric(sample$baseline_subtracted)
         min_len <- min(length(temp), length(dcp_data))
@@ -436,7 +482,14 @@ mod_review_endpoints_server <- function(id, app_data) {
         dcp_data <- dcp_data[1:min_len]
         plot_title_suffix <- " (Baseline Subtracted)"
       } else {
-        temp <- as.numeric(sample$temperature)
+        # Plot raw data (uses original temperature values)
+        # Fallback to interpolated temperature if original not available (backwards compatibility)
+        if (!is.null(sample$temperature_original)) {
+          temp <- as.numeric(sample$temperature_original)
+        } else {
+          temp <- as.numeric(sample$temperature)
+          cat("[WARNING] Using interpolated temperature for raw plot (re-process data recommended)\n")
+        }
         dcp_data <- as.numeric(sample$dcp_original)
         min_len <- min(length(temp), length(dcp_data))
         temp <- temp[1:min_len]
@@ -549,29 +602,69 @@ mod_review_endpoints_server <- function(id, app_data) {
         plotly::config(
           displayModeBar = TRUE,
           modeBarButtonsToRemove = list(
-            "pan2d", "lasso2d", "select2d", "autoScale2d",
+            "lasso2d", "select2d", "autoScale2d",
             "hoverClosestCartesian", "hoverCompareCartesian",
             "toggleSpikelines"
           ),
           displaylogo = FALSE
-        ) %>%
-        plotly::event_register("plotly_click")
+        )
+      
+      # Set source for click event tracking
+      p$x$source <- "thermogram_plot"
+      
+      # Verify source is set
+      cat("\n[PLOT] Rendering plot for sample:", selected_sample(), "\n")
+      cat("[PLOT] Source set to:", p$x$source, "\n")
       
       p
     })
     
     # Handle plot clicks for manual endpoint adjustment
-    observeEvent(input$plotly_click, {
+    observeEvent(plot_click(), {
+      # Only process when in adjustment mode
       req(adjustment_mode())
       req(selected_sample())
       
-      click_data <- input$plotly_click
-      if (is.null(click_data) || is.null(click_data$x)) return()
+      click_data <- plot_click()
+      req(click_data)
+      req(!is.null(click_data$x))
+      
+      # Debug output
+      cat("\n=== PLOT CLICK DETECTED ===\n")
+      cat("  Temperature:", click_data$x, "\n")
+      cat("  Mode:", adjustment_mode(), "\n")
+      cat("  Sample:", selected_sample(), "\n")
+      
+      # Create a unique key for this click event
+      click_key <- paste(click_data$x, click_data$y, 
+                         ifelse(is.null(click_data$curveNumber), 0, click_data$curveNumber), 
+                         sep = "_")
+      
+      # Skip if we've already processed this exact click
+      if (!is.null(isolate(last_click_key())) && isolate(last_click_key()) == click_key) {
+        cat("  Skipping duplicate click\n")
+        return()
+      }
+      
+      # Update last processed click
+      last_click_key(click_key)
       
       clicked_temp <- click_data$x
-      mode <- adjustment_mode()
-      sample_id <- selected_sample()
-      sample <- app_data$processed_data$samples[[sample_id]]
+      mode <- isolate(adjustment_mode())
+      sample_id <- isolate(selected_sample())
+      sample <- isolate(app_data$processed_data$samples[[sample_id]])
+      
+      cat("  Processing click...\n")
+      
+      # Check if we have original temperature data (for backwards compatibility)
+      if (is.null(sample$temperature_original)) {
+        showNotification(
+          "Cannot adjust endpoints: Original temperature data not available. Please re-process the data.",
+          type = "error",
+          duration = 5
+        )
+        return()
+      }
       
       # Capture state before modification (for undo)
       previous_state <- capture_sample_state(sample_id)
@@ -605,11 +698,13 @@ mod_review_endpoints_server <- function(id, app_data) {
         }
         new_lower <- sample$lower_endpoint
         new_upper <- clicked_temp
+      } else {
+        return()
       }
       
       # Re-process with new endpoints
       result <- reprocess_with_manual_endpoints(
-        temperature = sample$temperature,
+        temperature = sample$temperature_original,
         dcp = sample$dcp_original,
         lower_endpoint = new_lower,
         upper_endpoint = new_upper
@@ -624,6 +719,8 @@ mod_review_endpoints_server <- function(id, app_data) {
         return()
       }
       
+      cat("  Successfully reprocessed with new endpoint\n")
+      
       # Push to undo stack BEFORE making changes
       push_undo_state(
         sample_id = sample_id,
@@ -631,14 +728,50 @@ mod_review_endpoints_server <- function(id, app_data) {
         previous_state = previous_state
       )
       
-      # Update the sample with new results
-      app_data$processed_data$samples[[sample_id]]$lower_endpoint <- result$lower_endpoint
-      app_data$processed_data$samples[[sample_id]]$upper_endpoint <- result$upper_endpoint
-      app_data$processed_data$samples[[sample_id]]$baseline_subtracted <- result$baseline_subtracted
-      app_data$processed_data$samples[[sample_id]]$manual_adjustment <- TRUE
+      # CRITICAL: Save current sample to prevent grid reactivity from changing selection
+      current_sample <- isolate(selected_sample())
       
-      # Exit adjustment mode
+      # Set flag to block grid observer
+      programmatic_selection(TRUE)
+      
+      # Update the sample with new results
+      isolate({
+        app_data$processed_data$samples[[sample_id]]$lower_endpoint <- result$lower_endpoint
+        app_data$processed_data$samples[[sample_id]]$upper_endpoint <- result$upper_endpoint
+        app_data$processed_data$samples[[sample_id]]$baseline_subtracted <- result$baseline_subtracted
+        
+        # Set manual flags - only mark the endpoint that was actually adjusted
+        if (mode == "lower") {
+          app_data$processed_data$samples[[sample_id]]$lower_manual <- TRUE
+        } else if (mode == "upper") {
+          app_data$processed_data$samples[[sample_id]]$upper_manual <- TRUE
+        }
+        
+        # Set global manual flag if either endpoint is manual
+        app_data$processed_data$samples[[sample_id]]$manual_adjustment <- 
+          app_data$processed_data$samples[[sample_id]]$lower_manual || 
+          app_data$processed_data$samples[[sample_id]]$upper_manual
+      })
+      
+      # Force selection to stay on current sample
+      selected_sample(current_sample)
+      
+      # Restore grid selection explicitly
+      grid_data <- isolate(sample_grid_data())
+      current_idx <- which(grid_data[[1]] == current_sample)
+      if (length(current_idx) > 0) {
+        proxy <- DT::dataTableProxy("sample_grid")
+        DT::selectRows(proxy, current_idx[1])
+      }
+      
+      # Small delay before allowing grid to react again
+      shinyjs::delay(50, {
+        programmatic_selection(FALSE)
+      })
+      
+      # Exit adjustment mode and remove ALL notifications
       adjustment_mode(NULL)
+      removeNotification(id = "adjustment_notification")
       
       showNotification(
         sprintf(
@@ -649,11 +782,15 @@ mod_review_endpoints_server <- function(id, app_data) {
         type = "message",
         duration = 3
       )
-    })
+      
+      cat("  Endpoint adjustment complete!\n\n")
+    }, ignoreNULL = TRUE, ignoreInit = TRUE)
     
     # Cancel adjustment mode
     observeEvent(input$cancel_adjustment, {
       adjustment_mode(NULL)
+      last_click_key(NULL)
+      removeNotification(id = "adjustment_notification")
     })
     
     # Render review controls
@@ -666,7 +803,10 @@ mod_review_endpoints_server <- function(id, app_data) {
         return(p(class = "text-muted", "No controls available for failed samples."))
       }
       
+      # Check if sample has been manually adjusted
       is_manual <- !is.null(sample$manual_adjustment) && sample$manual_adjustment
+      lower_manual <- if(is.null(sample$lower_manual)) FALSE else sample$lower_manual
+      upper_manual <- if(is.null(sample$upper_manual)) FALSE else sample$upper_manual
       
       tagList(
         # Endpoint information
@@ -685,9 +825,9 @@ mod_review_endpoints_server <- function(id, app_data) {
                   div(
                     style = "font-family: monospace; font-size: 1.1rem; color: #2ca02c;",
                     tags$span(
-                      class = if (is_manual) "badge bg-warning me-1" else "badge bg-success me-1",
+                      class = if (lower_manual) "badge bg-warning me-1" else "badge bg-success me-1",
                       style = "font-size: 0.6rem; vertical-align: middle;",
-                      if (is_manual) icon("hand-pointer") else icon("robot")
+                      if (lower_manual) icon("hand-pointer") else icon("robot")
                     ),
                     sprintf("%.1f°C", sample$lower_endpoint)
                   )
@@ -698,9 +838,9 @@ mod_review_endpoints_server <- function(id, app_data) {
                   div(
                     style = "font-family: monospace; font-size: 1.1rem; color: #9467bd;",
                     tags$span(
-                      class = if (is_manual) "badge bg-warning me-1" else "badge bg-success me-1",
+                      class = if (upper_manual) "badge bg-warning me-1" else "badge bg-success me-1",
                       style = "font-size: 0.6rem; vertical-align: middle;",
-                      if (is_manual) icon("hand-pointer") else icon("robot")
+                      if (upper_manual) icon("hand-pointer") else icon("robot")
                     ),
                     sprintf("%.1f°C", sample$upper_endpoint)
                   )
@@ -808,7 +948,10 @@ mod_review_endpoints_server <- function(id, app_data) {
     
     # Handle "Adjust Lower" button
     observeEvent(input$adjust_lower, {
+      cat("\n[BUTTON] Adjust Lower clicked\n")
       adjustment_mode("lower")
+      cat("[BUTTON] Mode set to:", adjustment_mode(), "\n")
+      last_click_key(NULL)
       showNotification(
         "Click on the plot to set the lower endpoint",
         id = "adjustment_notification",
@@ -819,7 +962,10 @@ mod_review_endpoints_server <- function(id, app_data) {
     
     # Handle "Adjust Upper" button
     observeEvent(input$adjust_upper, {
+      cat("\n[BUTTON] Adjust Upper clicked\n")
       adjustment_mode("upper")
+      cat("[BUTTON] Mode set to:", adjustment_mode(), "\n")
+      last_click_key(NULL)
       showNotification(
         "Click on the plot to set the upper endpoint",
         id = "adjustment_notification",
@@ -861,7 +1007,7 @@ mod_review_endpoints_server <- function(id, app_data) {
       
       if (!is.null(sample$auto_lower_endpoint) && !is.null(sample$auto_upper_endpoint)) {
         result <- reprocess_with_manual_endpoints(
-          temperature = sample$temperature,
+          temperature = sample$temperature_original,
           dcp = sample$dcp_original,
           lower_endpoint = sample$auto_lower_endpoint,
           upper_endpoint = sample$auto_upper_endpoint
@@ -875,11 +1021,34 @@ mod_review_endpoints_server <- function(id, app_data) {
             previous_state = previous_state
           )
           
+          # CRITICAL: Save current sample and block grid reactivity
+          current_sample <- isolate(selected_sample())
+          programmatic_selection(TRUE)
+          
           # Update the sample
-          app_data$processed_data$samples[[sample_id]]$lower_endpoint <- result$lower_endpoint
-          app_data$processed_data$samples[[sample_id]]$upper_endpoint <- result$upper_endpoint
-          app_data$processed_data$samples[[sample_id]]$baseline_subtracted <- result$baseline_subtracted
-          app_data$processed_data$samples[[sample_id]]$manual_adjustment <- FALSE
+          isolate({
+            app_data$processed_data$samples[[sample_id]]$lower_endpoint <- result$lower_endpoint
+            app_data$processed_data$samples[[sample_id]]$upper_endpoint <- result$upper_endpoint
+            app_data$processed_data$samples[[sample_id]]$baseline_subtracted <- result$baseline_subtracted
+            app_data$processed_data$samples[[sample_id]]$manual_adjustment <- FALSE
+            app_data$processed_data$samples[[sample_id]]$lower_manual <- FALSE
+            app_data$processed_data$samples[[sample_id]]$upper_manual <- FALSE
+          })
+          
+          # Force selection to stay
+          selected_sample(current_sample)
+          
+          # Restore grid selection
+          grid_data <- isolate(sample_grid_data())
+          current_idx <- which(grid_data[[1]] == current_sample)
+          if (length(current_idx) > 0) {
+            proxy <- DT::dataTableProxy("sample_grid")
+            DT::selectRows(proxy, current_idx[1])
+          }
+          
+          shinyjs::delay(50, {
+            programmatic_selection(FALSE)
+          })
           
           showNotification(
             "Manual changes discarded - reverted to auto-detected endpoints",
@@ -908,19 +1077,35 @@ mod_review_endpoints_server <- function(id, app_data) {
         )
       }
       
-      # Update the data
-      app_data$processed_data$samples[[sample_id]]$reviewed <- input$mark_reviewed
+      # CRITICAL: Save current sample and block grid reactivity
+      current_sample <- isolate(selected_sample())
+      programmatic_selection(TRUE)
       
-      # Refresh grid
+      # Update the data in isolation
+      isolate({
+        app_data$processed_data$samples[[sample_id]]$reviewed <- input$mark_reviewed
+      })
+      
+      # Update grid data to show new status
       grid_data <- isolate(sample_grid_data())
-      current_idx <- which(grid_data[[1]] == sample_id)
-      proxy <- DT::dataTableProxy("sample_grid")
-      DT::replaceData(proxy = proxy, data = grid_data, resetPaging = FALSE, rownames = FALSE)
+      current_idx <- which(grid_data[[1]] == current_sample)
       
+      proxy <- DT::dataTableProxy("sample_grid")
+      DT::replaceData(proxy = proxy, data = grid_data, resetPaging = FALSE, rownames = FALSE, clearSelection = FALSE)
+      
+      # Force selection to stay on current sample
+      selected_sample(current_sample)
+      
+      # Restore grid selection explicitly after data replacement
+      if (length(current_idx) > 0) {
+        shinyjs::delay(20, {
+          DT::selectRows(proxy, current_idx[1])
+        })
+      }
+      
+      # Release block after delay
       shinyjs::delay(50, {
-        programmatic_selection(TRUE)
-        DT::selectRows(proxy, current_idx)
-        shinyjs::delay(10, { programmatic_selection(FALSE) })
+        programmatic_selection(FALSE)
       })
     }, priority = 10)
     
@@ -940,19 +1125,35 @@ mod_review_endpoints_server <- function(id, app_data) {
         )
       }
       
-      # Update the data
-      app_data$processed_data$samples[[sample_id]]$excluded <- input$mark_excluded
+      # CRITICAL: Save current sample and block grid reactivity
+      current_sample <- isolate(selected_sample())
+      programmatic_selection(TRUE)
       
-      # Refresh grid
+      # Update the data in isolation
+      isolate({
+        app_data$processed_data$samples[[sample_id]]$excluded <- input$mark_excluded
+      })
+      
+      # Update grid data to show new status
       grid_data <- isolate(sample_grid_data())
-      current_idx <- which(grid_data[[1]] == sample_id)
-      proxy <- DT::dataTableProxy("sample_grid")
-      DT::replaceData(proxy = proxy, data = grid_data, resetPaging = FALSE, rownames = FALSE)
+      current_idx <- which(grid_data[[1]] == current_sample)
       
+      proxy <- DT::dataTableProxy("sample_grid")
+      DT::replaceData(proxy = proxy, data = grid_data, resetPaging = FALSE, rownames = FALSE, clearSelection = FALSE)
+      
+      # Force selection to stay on current sample
+      selected_sample(current_sample)
+      
+      # Restore grid selection explicitly after data replacement
+      if (length(current_idx) > 0) {
+        shinyjs::delay(20, {
+          DT::selectRows(proxy, current_idx[1])
+        })
+      }
+      
+      # Release block after delay
       shinyjs::delay(50, {
-        programmatic_selection(TRUE)
-        DT::selectRows(proxy, current_idx)
-        shinyjs::delay(10, { programmatic_selection(FALSE) })
+        programmatic_selection(FALSE)
       })
     }, priority = 10)
     
@@ -967,8 +1168,13 @@ mod_review_endpoints_server <- function(id, app_data) {
       # Capture current state for redo
       current_state <- capture_sample_state(last_entry$sample_id)
       
+      # Block grid reactivity
+      programmatic_selection(TRUE)
+      
       # Restore previous state
-      restore_sample_state(last_entry$sample_id, last_entry$previous_state)
+      isolate({
+        restore_sample_state(last_entry$sample_id, last_entry$previous_state)
+      })
       
       # Push current state to redo stack
       redo_entry <- list(
@@ -979,16 +1185,31 @@ mod_review_endpoints_server <- function(id, app_data) {
       )
       app_data$redo_stack <- c(app_data$redo_stack, list(redo_entry))
       
-      # Navigate to the affected sample
-      selected_sample(last_entry$sample_id)
-      grid_data <- sample_grid_data()
+      # Only navigate if we're not already on that sample
+      if (isolate(selected_sample()) != last_entry$sample_id) {
+        selected_sample(last_entry$sample_id)
+      }
+      
+      # If this was a review status change, update the grid data
+      if (last_entry$action_type == "review_status") {
+        grid_data <- isolate(sample_grid_data())
+        proxy <- DT::dataTableProxy("sample_grid")
+        DT::replaceData(proxy = proxy, data = grid_data, resetPaging = FALSE, rownames = FALSE, clearSelection = FALSE)
+      }
+      
+      # Restore grid selection
+      grid_data <- isolate(sample_grid_data())
       idx <- which(grid_data[[1]] == last_entry$sample_id)
       if (length(idx) > 0) {
         proxy <- DT::dataTableProxy("sample_grid")
-        programmatic_selection(TRUE)
-        DT::selectRows(proxy, idx[1])
-        shinyjs::delay(10, { programmatic_selection(FALSE) })
+        shinyjs::delay(20, {
+          DT::selectRows(proxy, idx[1])
+        })
       }
+      
+      shinyjs::delay(50, {
+        programmatic_selection(FALSE)
+      })
       
       showNotification(
         sprintf("Undid %s for sample %s", 
@@ -1010,8 +1231,13 @@ mod_review_endpoints_server <- function(id, app_data) {
       # Capture current state for undo
       current_state <- capture_sample_state(last_entry$sample_id)
       
-      # Restore previous state (which is actually the "forward" state for redo)
-      restore_sample_state(last_entry$sample_id, last_entry$previous_state)
+      # Block grid reactivity
+      programmatic_selection(TRUE)
+      
+      # Restore previous state
+      isolate({
+        restore_sample_state(last_entry$sample_id, last_entry$previous_state)
+      })
       
       # Push current state back to undo stack
       undo_entry <- list(
@@ -1022,16 +1248,31 @@ mod_review_endpoints_server <- function(id, app_data) {
       )
       app_data$undo_stack <- c(app_data$undo_stack, list(undo_entry))
       
-      # Navigate to the affected sample
-      selected_sample(last_entry$sample_id)
-      grid_data <- sample_grid_data()
+      # Only navigate if we're not already on that sample
+      if (isolate(selected_sample()) != last_entry$sample_id) {
+        selected_sample(last_entry$sample_id)
+      }
+      
+      # If this was a review status change, update the grid data
+      if (last_entry$action_type == "review_status") {
+        grid_data <- isolate(sample_grid_data())
+        proxy <- DT::dataTableProxy("sample_grid")
+        DT::replaceData(proxy = proxy, data = grid_data, resetPaging = FALSE, rownames = FALSE, clearSelection = FALSE)
+      }
+      
+      # Restore grid selection
+      grid_data <- isolate(sample_grid_data())
       idx <- which(grid_data[[1]] == last_entry$sample_id)
       if (length(idx) > 0) {
         proxy <- DT::dataTableProxy("sample_grid")
-        programmatic_selection(TRUE)
-        DT::selectRows(proxy, idx[1])
-        shinyjs::delay(10, { programmatic_selection(FALSE) })
+        shinyjs::delay(20, {
+          DT::selectRows(proxy, idx[1])
+        })
       }
+      
+      shinyjs::delay(50, {
+        programmatic_selection(FALSE)
+      })
       
       showNotification(
         sprintf("Redid %s for sample %s", 
@@ -1057,7 +1298,9 @@ mod_review_endpoints_server <- function(id, app_data) {
         proxy <- DT::dataTableProxy("sample_grid")
         programmatic_selection(TRUE)
         DT::selectRows(proxy, new_idx)
-        shinyjs::delay(10, { programmatic_selection(FALSE) })
+        shinyjs::delay(10, {
+          programmatic_selection(FALSE)
+        })
       }
     })
     
@@ -1076,7 +1319,9 @@ mod_review_endpoints_server <- function(id, app_data) {
         proxy <- DT::dataTableProxy("sample_grid")
         programmatic_selection(TRUE)
         DT::selectRows(proxy, new_idx)
-        shinyjs::delay(10, { programmatic_selection(FALSE) })
+        shinyjs::delay(10, {
+          programmatic_selection(FALSE)
+        })
       }
     })
     
