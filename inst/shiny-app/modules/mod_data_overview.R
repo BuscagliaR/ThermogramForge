@@ -1,5 +1,5 @@
-# Data Overview Module
-# Displays summary cards, file upload, processing, and saved data management
+# Data Overview Module - REDESIGNED (Bug Fixes)
+# Multi-dataset support with improved UX
 
 #' Data Overview UI
 #'
@@ -10,7 +10,6 @@ mod_data_overview_ui <- function(id) {
   ns <- NS(id)
   
   tagList(
-    # Page header
     div(
       class = "container-fluid p-3",
       
@@ -47,7 +46,7 @@ mod_data_overview_ui <- function(id) {
                 class = "display-4 text-primary",
                 textOutput(ns("raw_count"))
               ),
-              p(class = "text-muted", "files uploaded")
+              p(class = "text-muted", "unprocessed datasets")
             )
           )
         ),
@@ -59,7 +58,7 @@ mod_data_overview_ui <- function(id) {
             class = "card",
             div(
               class = "card-header",
-              icon("cogs"), " Processed Samples"
+              icon("cogs"), " Processed Datasets"
             ),
             div(
               class = "card-body text-center",
@@ -67,7 +66,7 @@ mod_data_overview_ui <- function(id) {
                 class = "display-4 text-success",
                 textOutput(ns("processed_count"))
               ),
-              p(class = "text-muted", "samples processed")
+              p(class = "text-muted", "datasets ready for review/reports")
             )
           )
         ),
@@ -93,47 +92,40 @@ mod_data_overview_ui <- function(id) {
         )
       ),
       
-      # Upload section
+      # ===================================================================
+      # UPLOADED FILES SECTION (Combined raw + processed)
+      # ===================================================================
       div(
-        class = "card",
+        class = "card mb-3",
         div(
-          class = "card-header",
-          icon("upload"), " Upload Data"
-        ),
-        div(
-          class = "card-body",
-          p(
-            "Upload CSV or Excel files containing thermogram data. ",
-            "Files should contain Temperature and dCp columns."
-          ),
+          class = "card-header d-flex justify-content-between align-items-center",
           div(
-            class = "d-flex gap-2",
-            actionButton(
-              ns("upload_btn"),
-              "Upload New Raw Thermogram Data",
-              icon = icon("upload"),
-              class = "btn-primary btn-lg"
-            ),
-            uiOutput(ns("process_button_ui"))
+            icon("list"), " Uploaded Datasets"
+          ),
+          actionButton(
+            ns("upload_btn"),
+            "Upload New Raw Thermogram Data",
+            icon = icon("upload"),
+            class = "btn-primary"
           )
-        )
-      ),
-      
-      # Uploaded files list
-      div(
-        class = "card mt-3",
-        div(
-          class = "card-header",
-          icon("list"), " Uploaded Files"
         ),
         div(
           class = "card-body",
-          uiOutput(ns("uploaded_files_list"))
+          
+          # Unprocessed files section
+          h5(icon("database"), " Raw Thermogram Data (Unprocessed)"),
+          uiOutput(ns("unprocessed_files_list")),
+          
+          tags$hr(),
+          
+          # Processed files section
+          h5(icon("check-circle"), " Processed Thermogram Data"),
+          uiOutput(ns("processed_files_list"))
         )
       ),
       
       # ===================================================================
-      # Processed Thermograms Section
+      # SAVED FILES SECTION (from disk)
       # ===================================================================
       div(
         class = "card mt-3",
@@ -154,8 +146,9 @@ mod_data_overview_ui <- function(id) {
           p(
             class = "text-muted",
             icon("info-circle"),
-            " RDS files contain full data for Review Endpoints and Reports. ",
-            "CSV/Excel files can be loaded for report generation only."
+            " Load previously saved datasets from disk. ",
+            "RDS files contain full data for Review Endpoints. ",
+            "CSV/Excel files are for report generation only."
           ),
           uiOutput(ns("saved_files_ui"))
         )
@@ -175,41 +168,51 @@ mod_data_overview_server <- function(id, app_data) {
     
     ns <- session$ns
     
-    # Initialize uploaded files tracker
-    uploaded_files <- reactiveVal(list())
+    # =========================================================================
+    # DATA STRUCTURES
+    # =========================================================================
+    
+    # Track all uploaded files (both processed and unprocessed)
+    uploaded_datasets <- reactiveVal(list())
+    
+    # Counter for unique IDs
+    dataset_counter <- reactiveVal(0)
+    
+    # Track which observers have been created (to prevent duplicates)
+    created_observers <- reactiveVal(character(0))
     
     # Reactive for saved files list (refreshable)
     saved_files_trigger <- reactiveVal(0)
     
     saved_files_df <- reactive({
-      # Depend on trigger for refresh
       saved_files_trigger()
-      
-      # Get list of saved processed datasets
       list_processed_datasets()
     })
     
     # =========================================================================
-    # SUMMARY COUNTS
+    # SUMMARY COUNTS (BUG FIX: Handle empty list)
     # =========================================================================
     
     output$raw_count <- renderText({
-      length(uploaded_files())
+      datasets <- uploaded_datasets()
+      
+      # Handle empty list case
+      if (length(datasets) == 0) return("0")
+      
+      # Count unprocessed
+      count <- length(Filter(function(d) d$status == "unprocessed", datasets))
+      as.character(count)
     })
     
     output$processed_count <- renderText({
-      if (is.null(app_data$processed_data)) {
-        "0"
-      } else {
-        # Handle both full and report-only data
-        if (!is.null(app_data$processed_data$summary)) {
-          as.character(app_data$processed_data$summary$n_success)
-        } else if (!is.null(app_data$processed_data$n_samples)) {
-          as.character(app_data$processed_data$n_samples)
-        } else {
-          "0"
-        }
-      }
+      datasets <- uploaded_datasets()
+      
+      # Handle empty list case
+      if (length(datasets) == 0) return("0")
+      
+      # Count processed and loaded
+      count <- length(Filter(function(d) d$status %in% c("processed", "loaded"), datasets))
+      as.character(count)
     })
     
     output$reports_count <- renderText({
@@ -217,18 +220,16 @@ mod_data_overview_server <- function(id, app_data) {
     })
     
     # =========================================================================
-    # RAW DATA UPLOAD (existing functionality - PRESERVED)
+    # RAW DATA UPLOAD
     # =========================================================================
     
-    # Upload button handler
     observeEvent(input$upload_btn, {
       showModal(
         modalDialog(
-          title = tagList(icon("upload"), " Upload Thermogram Data"),
+          title = tagList(icon("upload"), " Upload Raw Thermogram Data"),
           size = "l",
           easyClose = FALSE,
           
-          # File input
           div(
             class = "mb-3",
             fileInput(
@@ -246,7 +247,7 @@ mod_data_overview_server <- function(id, app_data) {
           
           footer = tagList(
             actionButton(ns("cancel_upload"), "Cancel", class = "btn-secondary"),
-            actionButton(ns("confirm_upload"), "Add to Dataset", class = "btn-primary", icon = icon("check"))
+            actionButton(ns("confirm_upload"), "Add Dataset", class = "btn-primary", icon = icon("check"))
           )
         )
       )
@@ -338,10 +339,26 @@ mod_data_overview_server <- function(id, app_data) {
       result <- upload_result()
       
       if (result$success) {
-        current_files <- uploaded_files()
-        current_files[[length(current_files) + 1]] <- result
-        uploaded_files(current_files)
-        app_data$raw_data <- result$data
+        # Generate unique ID
+        new_id <- dataset_counter() + 1
+        dataset_counter(new_id)
+        
+        # Create dataset entry
+        new_dataset <- list(
+          id = sprintf("dataset_%d", new_id),
+          file_name = result$file_name,
+          data = result$data,
+          format_info = result$format_info,
+          upload_time = Sys.time(),
+          status = "unprocessed",
+          processed_data = NULL
+        )
+        
+        # Add to list
+        current_datasets <- uploaded_datasets()
+        current_datasets[[length(current_datasets) + 1]] <- new_dataset
+        uploaded_datasets(current_datasets)
+        
         showNotification(paste("Successfully added", result$file_name), type = "message", duration = 3)
         removeModal()
       } else {
@@ -352,112 +369,263 @@ mod_data_overview_server <- function(id, app_data) {
     observeEvent(input$cancel_upload, { removeModal() })
     
     # =========================================================================
-    # PROCESS DATA
+    # BUTTON CLICK DETECTION (FIX: Track processed clicks)
     # =========================================================================
     
-    output$process_button_ui <- renderUI({
-      req(app_data$raw_data)
-      actionButton(ns("process_btn"), "Process Data", icon = icon("cogs"), class = "btn-success btn-lg")
-    })
+    # Track which button clicks we've already processed
+    processed_clicks <- reactiveVal(list())
     
-    observeEvent(input$process_btn, {
-      req(app_data$raw_data)
-      files <- uploaded_files()
-      if (length(files) == 0) return()
-      recent_file <- files[[length(files)]]
+    observe({
+      datasets <- uploaded_datasets()
+      if (length(datasets) == 0) return()
       
-      showModal(
-        modalDialog(
-          title = tagList(icon("cogs"), " Processing Thermogram Data"),
-          size = "m",
-          easyClose = FALSE,
-          footer = NULL,
-          div(
-            class = "text-center",
-            h5("Running baseline detection and signal quality assessment..."),
-            br(),
-            div(class = "spinner-border text-primary", role = "status", style = "width: 3rem; height: 3rem;", tags$span(class = "visually-hidden", "Processing...")),
-            br(), br(),
-            p(class = "text-muted", "This may take a moment for large datasets.")
-          )
-        )
-      )
+      input_names <- names(input)
+      clicks <- processed_clicks()
       
-      Sys.sleep(0.1)
-      
-      result <- process_thermogram_data(recent_file$data, recent_file$format_info, progress_callback = NULL)
-      app_data$processed_data <- result
-      app_data$baseline_results <- result$samples
-      
-      signal_summary <- list()
-      for (sample_id in names(result$samples)) {
-        sample <- result$samples[[sample_id]]
-        if (sample$success) signal_summary[[sample_id]] <- sample$has_signal
-      }
-      app_data$signal_detection <- signal_summary
-      
-      removeModal()
-      
-      showModal(
-        modalDialog(
-          title = tagList(icon("check-circle", class = "text-success"), " Processing Complete"),
-          size = "m",
-          easyClose = TRUE,
-          div(
-            class = "alert alert-success",
-            h5("Successfully processed thermogram data!"),
-            tags$hr(),
-            tags$ul(
-              tags$li(sprintf("Total samples: %d", result$summary$n_total)),
-              tags$li(sprintf("Successfully processed: %d", result$summary$n_success)),
-              tags$li(sprintf("Failed: %d", result$summary$n_failed)),
-              tags$li(sprintf("With signal: %d", result$summary$n_signal), tags$small(class = "text-muted ms-2", "(good quality)")),
-              tags$li(sprintf("No signal detected: %d", result$summary$n_no_signal), tags$small(class = "text-warning ms-2", "(noise only)"))
-            )
-          ),
-          footer = tagList(
-            actionButton(ns("goto_review"), "Go to Review Endpoints", icon = icon("arrow-right"), class = "btn-primary"),
-            modalButton("Close")
-          )
-        )
-      )
-    })
-    
-    observeEvent(input$goto_review, {
-      removeModal()
-      app_data$navigate_to <- "review_endpoints"
-    })
-    
-    output$uploaded_files_list <- renderUI({
-      files <- uploaded_files()
-      
-      if (length(files) == 0) {
-        return(p(class = "text-muted text-center", "No files uploaded yet. Click the button above to get started."))
+      # Check for process button clicks
+      process_buttons <- grep("^process_dataset_", input_names, value = TRUE)
+      for (btn in process_buttons) {
+        click_count <- input[[btn]]
+        if (!is.null(click_count) && click_count > 0) {
+          # Only process if this is a NEW click
+          if (is.null(clicks[[btn]]) || clicks[[btn]] < click_count) {
+            # Update tracking
+            clicks[[btn]] <- click_count
+            processed_clicks(clicks)
+            
+            # Extract dataset ID and process
+            dataset_id <- sub("^process_", "", btn)
+            dataset_idx <- which(sapply(datasets, function(d) d$id == dataset_id))
+            
+            if (length(dataset_idx) > 0 && datasets[[dataset_idx]]$status == "unprocessed") {
+              dataset <- datasets[[dataset_idx]]
+              
+              showModal(modalDialog(
+                title = tagList(icon("cogs"), " Processing Thermogram Data"),
+                size = "m", easyClose = FALSE, footer = NULL,
+                div(class = "text-center",
+                    h5(sprintf("Processing: %s", dataset$file_name)),
+                    br(),
+                    div(class = "spinner-border text-primary", role = "status", style = "width: 3rem; height: 3rem;"),
+                    br(), br(),
+                    p(class = "text-muted", "Running baseline detection..."))
+              ))
+              
+              Sys.sleep(0.1)
+              result <- process_thermogram_data(dataset$data, dataset$format_info, NULL)
+              
+              current_datasets <- uploaded_datasets()
+              current_datasets[[dataset_idx]]$status <- "processed"
+              current_datasets[[dataset_idx]]$processed_data <- result
+              uploaded_datasets(current_datasets)
+              
+              removeModal()
+              showNotification(sprintf("Processed %s (%d samples)", dataset$file_name, result$summary$n_success), 
+                               type = "message", duration = 5)
+            }
+          }
+        }
       }
       
-      div(
-        lapply(seq_along(files), function(i) {
-          file_info <- files[[i]]
+      # Check for review button clicks
+      review_buttons <- grep("^review_", input_names, value = TRUE)
+      for (btn in review_buttons) {
+        click_count <- input[[btn]]
+        if (!is.null(click_count) && click_count > 0) {
+          # Only process if this is a NEW click
+          if (is.null(clicks[[btn]]) || clicks[[btn]] < click_count) {
+            # Update tracking
+            clicks[[btn]] <- click_count
+            processed_clicks(clicks)
+            
+            # Extract dataset ID and load
+            dataset_id <- sub("^review_", "", btn)
+            dataset_idx <- which(sapply(datasets, function(d) d$id == dataset_id))
+            
+            if (length(dataset_idx) > 0) {
+              isolate({
+                app_data$processed_data <- datasets[[dataset_idx]]$processed_data
+                app_data$navigate_to <- "review_endpoints"
+              })
+            }
+          }
+        }
+      }
+      
+      # Check for report button clicks
+      report_buttons <- grep("^report_", input_names, value = TRUE)
+      for (btn in report_buttons) {
+        click_count <- input[[btn]]
+        if (!is.null(click_count) && click_count > 0) {
+          # Only process if this is a NEW click
+          if (is.null(clicks[[btn]]) || clicks[[btn]] < click_count) {
+            # Update tracking
+            clicks[[btn]] <- click_count
+            processed_clicks(clicks)
+            
+            # Extract dataset ID and load
+            dataset_id <- sub("^report_", "", btn)
+            dataset_idx <- which(sapply(datasets, function(d) d$id == dataset_id))
+            
+            if (length(dataset_idx) > 0) {
+              isolate({
+                app_data$processed_data <- datasets[[dataset_idx]]$processed_data
+                app_data$navigate_to <- "report_builder"
+              })
+            }
+          }
+        }
+      }
+    })
+    
+    # =========================================================================
+    # RENDER UNPROCESSED FILES LIST
+    # =========================================================================
+    
+    output$unprocessed_files_list <- renderUI({
+      datasets <- uploaded_datasets()
+      unprocessed <- Filter(function(d) d$status == "unprocessed", datasets)
+      
+      if (length(unprocessed) == 0) {
+        return(
+          p(class = "text-muted", icon("info-circle"), " No unprocessed datasets. Upload raw data to get started.")
+        )
+      }
+      
+      rows <- lapply(datasets, function(dataset) {
+        if (dataset$status != "unprocessed") return(NULL)
+        
+        div(
+          class = "card mb-2 border-primary",
           div(
-            class = "card mb-2",
+            class = "card-body p-3",
             div(
-              class = "card-body p-2",
+              class = "d-flex justify-content-between align-items-center",
               div(
-                class = "d-flex justify-content-between align-items-center",
+                class = "flex-grow-1",
                 div(
-                  icon("file"), " ", tags$strong(file_info$file_name),
-                  tags$small(class = "text-muted ms-2", sprintf("(%d samples, %d rows)", file_info$format_info$n_samples, file_info$format_info$n_rows))
+                  icon("file"), " ",
+                  strong(dataset$file_name),
+                  tags$span(class = "badge bg-warning text-dark ms-2", "Unprocessed")
                 ),
-                tags$small(class = "text-muted", format(file_info$upload_time, "%Y-%m-%d %H:%M"))
+                div(
+                  class = "small text-muted mt-1",
+                  sprintf(
+                    "%d samples | Uploaded: %s",
+                    dataset$format_info$n_samples,
+                    format(dataset$upload_time, "%Y-%m-%d %H:%M")
+                  )
+                )
+              ),
+              div(
+                class = "flex-shrink-0",
+                actionButton(
+                  ns(paste0("process_", dataset$id)),
+                  "Process Data",
+                  icon = icon("cogs"),
+                  class = "btn-success btn-sm"
+                )
               )
             )
           )
-        })
-      )
+        )
+      })
+      
+      # Filter out NULLs
+      rows <- Filter(Negate(is.null), rows)
+      tagList(rows)
     })
     
     # =========================================================================
-    # SAVED PROCESSED DATASETS
+    # RENDER PROCESSED FILES LIST
+    # =========================================================================
+    
+    output$processed_files_list <- renderUI({
+      datasets <- uploaded_datasets()
+      processed <- Filter(function(d) d$status %in% c("processed", "loaded"), datasets)
+      
+      if (length(processed) == 0) {
+        return(
+          p(class = "text-muted", icon("info-circle"), " No processed datasets yet. Process raw data or load saved datasets.")
+        )
+      }
+      
+      rows <- lapply(datasets, function(dataset) {
+        if (!dataset$status %in% c("processed", "loaded")) return(NULL)
+        
+        # Determine label and badge based on status
+        if (dataset$status == "loaded") {
+          status_label <- "Processed Thermogram Data"
+          badge_class <- "bg-info"
+          badge_text <- "Loaded"
+        } else {
+          status_label <- "Raw Thermogram Data (Processed)"
+          badge_class <- "bg-success"
+          badge_text <- "Processed"
+        }
+        
+        # Get sample count
+        n_samples <- if (!is.null(dataset$processed_data$summary)) {
+          dataset$processed_data$summary$n_success
+        } else if (!is.null(dataset$processed_data$n_samples)) {
+          dataset$processed_data$n_samples
+        } else {
+          "?"
+        }
+        
+        div(
+          class = "card mb-2 border-success",
+          div(
+            class = "card-body p-3",
+            div(
+              class = "d-flex justify-content-between align-items-center",
+              div(
+                class = "flex-grow-1",
+                div(
+                  icon("check-circle"), " ",
+                  strong(dataset$file_name),
+                  tags$span(class = sprintf("badge %s ms-2", badge_class), badge_text)
+                ),
+                div(
+                  class = "small text-muted mt-1",
+                  sprintf(
+                    "%s samples | %s: %s",
+                    n_samples,
+                    if(dataset$status == "loaded") "Loaded" else "Processed",
+                    format(dataset$upload_time, "%Y-%m-%d %H:%M")
+                  )
+                )
+              ),
+              div(
+                class = "flex-shrink-0",
+                div(
+                  class = "btn-group",
+                  actionButton(
+                    ns(paste0("review_", dataset$id)),
+                    "Review Endpoints",
+                    icon = icon("chart-line"),
+                    class = "btn-primary btn-sm"
+                  ),
+                  actionButton(
+                    ns(paste0("report_", dataset$id)),
+                    "Create Reports",
+                    icon = icon("file-export"),
+                    class = "btn-info btn-sm"
+                  )
+                )
+              )
+            )
+          )
+        )
+      })
+      
+      # Filter out NULLs
+      rows <- Filter(Negate(is.null), rows)
+      tagList(rows)
+    })
+    
+    # =========================================================================
+    # SAVED FILES SECTION
     # =========================================================================
     
     observe({ isolate(saved_files_trigger(1)) })
@@ -476,7 +644,7 @@ mod_data_overview_server <- function(id, app_data) {
             class = "text-center text-muted py-4",
             icon("folder-open", style = "font-size: 3em; opacity: 0.3;"),
             p("No saved processed datasets found"),
-            p(class = "small", "Process data and save from the Review Endpoints tab to see datasets here")
+            p(class = "small", "Save processed datasets from the Review Endpoints tab")
           )
         )
       }
@@ -484,7 +652,6 @@ mod_data_overview_server <- function(id, app_data) {
       rows <- lapply(seq_len(nrow(df)), function(i) {
         file_info <- df[i, ]
         
-        # All files can be loaded now
         action_buttons <- tagList(
           actionButton(
             ns(paste0("load_", i)),
@@ -542,7 +709,7 @@ mod_data_overview_server <- function(id, app_data) {
           title = tagList(icon("folder-open"), " Load Processed Dataset"),
           size = "m",
           
-          p("Are you sure you want to load this dataset?"),
+          p("Load this dataset into the application?"),
           
           div(
             class = "alert alert-info",
@@ -552,29 +719,8 @@ mod_data_overview_server <- function(id, app_data) {
               tags$li(strong("File: "), file_info$filename),
               tags$li(strong("Format: "), file_info$format),
               tags$li(strong("Load Type: "), file_info$load_type),
-              tags$li(strong("Modified: "), file_info$modified),
               tags$li(strong("Size: "), sprintf("%.2f MB", file_info$size_mb))
             )
-          ),
-          
-          if (file_info$format == "RDS") {
-            div(
-              class = "alert alert-success",
-              icon("check-circle"),
-              " This RDS file contains full data and will be loaded into Review Endpoints."
-            )
-          } else {
-            div(
-              class = "alert alert-warning",
-              icon("info-circle"),
-              " This file contains report-ready data only. Use Report Builder to generate reports."
-            )
-          },
-          
-          div(
-            class = "alert alert-warning",
-            icon("exclamation-triangle"),
-            " Loading will replace any currently loaded data."
           ),
           
           footer = tagList(
@@ -586,33 +732,41 @@ mod_data_overview_server <- function(id, app_data) {
       )
       
       session$userData$load_filepath <- file_info$filepath
-      session$userData$load_format <- file_info$format
+      session$userData$load_filename <- file_info$filename
     })
     
     observeEvent(input$confirm_load, {
       req(session$userData$load_filepath)
       
       filepath <- session$userData$load_filepath
-      file_format <- session$userData$load_format
+      filename <- session$userData$load_filename
       
-      cat(sprintf("[LOAD] Attempting to load: %s\n", filepath))
+      cat(sprintf("[LOAD] Loading from disk: %s\n", filepath))
       
       result <- load_processed_data(filepath)
       
       if (result$success) {
-        app_data$processed_data <- result$data
+        # Create new dataset entry
+        new_id <- dataset_counter() + 1
+        dataset_counter(new_id)
         
-        cat(sprintf("[LOAD] Successfully loaded - Type: %s\n", result$data_type))
+        new_dataset <- list(
+          id = sprintf("loaded_%d", new_id),
+          file_name = filename,
+          data = NULL,  # No raw data for loaded files
+          format_info = NULL,
+          upload_time = Sys.time(),
+          status = "loaded",
+          processed_data = result$data
+        )
+        
+        # Add to list
+        current_datasets <- uploaded_datasets()
+        current_datasets[[length(current_datasets) + 1]] <- new_dataset
+        uploaded_datasets(current_datasets)
         
         showNotification(result$message, type = "message", duration = 5)
-        
-        # Only navigate to Review Endpoints for RDS (full data)
-        if (result$data_type == "full") {
-          app_data$navigate_to <- "review_endpoints"
-          cat("[LOAD] Navigating to Review Endpoints\n")
-        } else {
-          cat("[LOAD] Report-only data - staying on Data Overview\n")
-        }
+        cat(sprintf("[LOAD] Successfully added to datasets list\n"))
         
         removeModal()
         
@@ -623,7 +777,7 @@ mod_data_overview_server <- function(id, app_data) {
       }
       
       session$userData$load_filepath <- NULL
-      session$userData$load_format <- NULL
+      session$userData$load_filename <- NULL
     })
     
     # =========================================================================
@@ -649,8 +803,8 @@ mod_data_overview_server <- function(id, app_data) {
           size = "m",
           
           div(class = "alert alert-danger", icon("exclamation-triangle"), strong(" Warning: This action cannot be undone!")),
-          p("Are you sure you want to permanently delete this file?"),
-          div(class = "alert alert-secondary", tags$ul(class = "mb-0", tags$li(strong("File: "), file_info$filename), tags$li(strong("Modified: "), file_info$modified))),
+          p("Permanently delete this file from disk?"),
+          div(class = "alert alert-secondary", tags$ul(class = "mb-0", tags$li(strong("File: "), file_info$filename))),
           
           footer = tagList(
             modalButton("Cancel"),
@@ -668,14 +822,14 @@ mod_data_overview_server <- function(id, app_data) {
       
       filepath <- session$userData$delete_filepath
       
-      cat(sprintf("[DELETE] Attempting to delete: %s\n", filepath))
+      cat(sprintf("[DELETE] Deleting from disk: %s\n", filepath))
       
       result <- delete_processed_data(filepath)
       
       if (result$success) {
         showNotification(result$message, type = "message", duration = 3)
         saved_files_trigger(saved_files_trigger() + 1)
-        cat(sprintf("[DELETE] Successfully deleted: %s\n", basename(filepath)))
+        cat(sprintf("[DELETE] Successfully deleted\n"))
       } else {
         showNotification(result$message, type = "error", duration = 5)
         cat(sprintf("[DELETE] Failed: %s\n", result$message))
