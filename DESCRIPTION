@@ -31,9 +31,10 @@ Imports:
     jsonlite (>= 1.8.0),
     logger (>= 0.2.0),
     purrr (>= 0.3.0),
-    rlang (>= 1.0.0)
+    rlang (>= 1.0.0),
+    ThermogramBaseline,
+    tlbparam
 Suggests:
-    testthat (>= 3.1.0),
     testthat (>= 3.1.0),
     shinytest2 (>= 0.2.0),
     mockery (>= 0.4.0),
@@ -42,6 +43,9 @@ Suggests:
     knitr (>= 1.42),
     rmarkdown (>= 2.20),
     pkgdown (>= 2.0.0)
+Remotes:
+    BuscagliaR/Thermogram_Baseline,
+    BuscagliaR/tlbparam
 VignetteBuilder: knitr
 URL: https://github.com/BuscagliaR/ThermogramForge
 BugReports: https://github.com/BuscagliaR/ThermogramForge/issues
