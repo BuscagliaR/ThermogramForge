@@ -55,7 +55,13 @@ mod_report_builder_ui <- function(id) {
               ns("reset_to_defaults"),
               "Reset to Defaults",
               icon = icon("rotate-left"),
-              class = "btn-outline-primary btn-sm"
+              class = "btn-outline-primary btn-sm me-2"
+            ),
+            actionButton(
+              ns("calculate_preview"),
+              "Calculate Preview",
+              icon = icon("calculator"),
+              class = "btn-primary btn-sm"
             )
           ),
           
@@ -109,8 +115,6 @@ mod_report_builder_ui <- function(id) {
                       "Tm1" = "Tm1",
                       "Tm2" = "Tm2",
                       "Tm3" = "Tm3",
-                      "Tonset" = "Tonset",
-                      "Toffset" = "Toffset",
                       "TV12" = "TV12"
                     ),
                     selected = c("Tm1", "Tm2")  # Defaults
@@ -137,7 +141,6 @@ mod_report_builder_ui <- function(id) {
                     label = NULL,
                     choices = c(
                       "AUC" = "AUC",
-                      "AUC_normalized" = "AUC_normalized",
                       "Area" = "Area"
                     ),
                     selected = c("AUC")  # Default
@@ -159,9 +162,7 @@ mod_report_builder_ui <- function(id) {
                     label = NULL,
                     choices = c(
                       "FWHM" = "FWHM",
-                      "Width_50" = "Width_50",
-                      "Width_80" = "Width_80",
-                      "Asymmetry" = "Asymmetry"
+                      "Width_50" = "Width_50"
                     ),
                     selected = c("FWHM")  # Default
                   )
@@ -217,33 +218,11 @@ mod_report_builder_ui <- function(id) {
                 )
               ),
               
-              # Ratio Metrics
-              div(
-                class = "card mb-3",
-                div(
-                  class = "card-header",
-                  tags$strong("Ratio Metrics")
-                ),
-                div(
-                  class = "card-body",
-                  checkboxGroupInput(
-                    ns("metrics_ratio"),
-                    label = NULL,
-                    choices = c(
-                      "V1.2_Peak1_Ratio" = "V1.2_Peak1_Ratio",
-                      "V1.2_Peak2_Ratio" = "V1.2_Peak2_Ratio",
-                      "V1.2_Peak3_Ratio" = "V1.2_Peak3_Ratio"
-                    ),
-                    selected = NULL  # None by default
-                  )
-                )
-              ),
-              
               # Info box
               div(
                 class = "alert alert-info",
                 icon("info-circle"), " ",
-                tags$strong("Tip:"), " Hover over metric names for descriptions (coming soon)"
+                tags$strong("Tip:"), " Click 'Calculate Preview' to see metric values"
               )
             )
           )
@@ -354,7 +333,7 @@ mod_report_builder_server <- function(id, app_data) {
       # Clear any previous calculations
       calculated_metrics(NULL)
       
-      # Log successful reload
+      # Log successful reload (no notification - only Review Endpoints shows one)
       if (!is.null(app_data$processed_data)) {
         n_samples <- length(app_data$processed_data$samples)
         cat(sprintf("[REPORT_BUILDER] Dataset loaded successfully: %d samples\n", n_samples))
@@ -413,51 +392,6 @@ mod_report_builder_server <- function(id, app_data) {
     
     # ---- Metric Selection Helpers ----
     
-    # Get all metric categories
-    all_metric_inputs <- reactive({
-      c(
-        "metrics_peak",
-        "metrics_transition",
-        "metrics_area",
-        "metrics_shape",
-        "metrics_height",
-        "metrics_temperature",
-        "metrics_ratio"
-      )
-    })
-    
-    # Get all possible metrics
-    all_metrics <- reactive({
-      c(
-        # Peak
-        "Tm", "Tpeak_1", "Tpeak_2", "Tpeak_3", "Tpeak_f",
-        # Transition
-        "Tm1", "Tm2", "Tm3", "Tonset", "Toffset", "TV12",
-        # Area
-        "AUC", "AUC_normalized", "Area",
-        # Shape
-        "FWHM", "Width_50", "Width_80", "Asymmetry",
-        # Height
-        "Max", "Min", "Median",
-        # Temperature
-        "TMax", "TMin", "TFM",
-        # Ratio
-        "V1.2_Peak1_Ratio", "V1.2_Peak2_Ratio", "V1.2_Peak3_Ratio"
-      )
-    })
-    
-    # Default metrics
-    default_metrics <- reactive({
-      c(
-        "Tm", "Tpeak_1", "Tpeak_2",  # Peak defaults
-        "Tm1", "Tm2",  # Transition defaults
-        "AUC",  # Area default
-        "FWHM",  # Shape default
-        "Max",  # Height default
-        "TMax"  # Temperature default
-      )
-    })
-    
     # Get currently selected metrics from all categories
     selected_metrics <- reactive({
       metrics <- c(
@@ -466,8 +400,7 @@ mod_report_builder_server <- function(id, app_data) {
         input$metrics_area,
         input$metrics_shape,
         input$metrics_height,
-        input$metrics_temperature,
-        input$metrics_ratio
+        input$metrics_temperature
       )
       unique(metrics)
     })
@@ -479,17 +412,15 @@ mod_report_builder_server <- function(id, app_data) {
       updateCheckboxGroupInput(session, "metrics_peak", 
                                selected = c("Tm", "Tpeak_1", "Tpeak_2", "Tpeak_3", "Tpeak_f"))
       updateCheckboxGroupInput(session, "metrics_transition",
-                               selected = c("Tm1", "Tm2", "Tm3", "Tonset", "Toffset", "TV12"))
+                               selected = c("Tm1", "Tm2", "Tm3", "TV12"))
       updateCheckboxGroupInput(session, "metrics_area",
-                               selected = c("AUC", "AUC_normalized", "Area"))
+                               selected = c("AUC", "Area"))
       updateCheckboxGroupInput(session, "metrics_shape",
-                               selected = c("FWHM", "Width_50", "Width_80", "Asymmetry"))
+                               selected = c("FWHM", "Width_50"))
       updateCheckboxGroupInput(session, "metrics_height",
                                selected = c("Max", "Min", "Median"))
       updateCheckboxGroupInput(session, "metrics_temperature",
                                selected = c("TMax", "TMin", "TFM"))
-      updateCheckboxGroupInput(session, "metrics_ratio",
-                               selected = c("V1.2_Peak1_Ratio", "V1.2_Peak2_Ratio", "V1.2_Peak3_Ratio"))
       
       showNotification("All metrics selected", type = "message")
     })
@@ -502,7 +433,9 @@ mod_report_builder_server <- function(id, app_data) {
       updateCheckboxGroupInput(session, "metrics_shape", selected = character(0))
       updateCheckboxGroupInput(session, "metrics_height", selected = character(0))
       updateCheckboxGroupInput(session, "metrics_temperature", selected = character(0))
-      updateCheckboxGroupInput(session, "metrics_ratio", selected = character(0))
+      
+      # Clear calculated metrics
+      calculated_metrics(NULL)
       
       showNotification("All metrics cleared", type = "message")
     })
@@ -521,9 +454,72 @@ mod_report_builder_server <- function(id, app_data) {
                                selected = c("Max"))
       updateCheckboxGroupInput(session, "metrics_temperature",
                                selected = c("TMax"))
-      updateCheckboxGroupInput(session, "metrics_ratio", selected = character(0))
       
       showNotification("Reset to default metrics", type = "message")
+    })
+    
+    # Calculate Preview
+    observeEvent(input$calculate_preview, {
+      
+      # Check if data is loaded
+      if (is.null(app_data$processed_data)) {
+        showNotification(
+          "No processed data available. Please load data first.",
+          type = "error",
+          duration = 5
+        )
+        return()
+      }
+      
+      # Check if metrics are selected
+      metrics <- selected_metrics()
+      if (length(metrics) == 0) {
+        showNotification(
+          "Please select at least one metric to calculate.",
+          type = "warning",
+          duration = 3
+        )
+        return()
+      }
+      
+      # Set calculating flag
+      calculating(TRUE)
+      
+      showNotification(
+        sprintf("Calculating %d metrics for %d samples...", 
+                length(metrics),
+                length(app_data$processed_data$samples)),
+        type = "message",
+        duration = 3
+      )
+      
+      # Calculate metrics
+      result <- tryCatch({
+        calculate_tlbparam_metrics(
+          processed_data = app_data$processed_data,
+          selected_metrics = metrics
+        )
+      }, error = function(e) {
+        showNotification(
+          sprintf("Error calculating metrics: %s", e$message),
+          type = "error",
+          duration = 10
+        )
+        return(NULL)
+      })
+      
+      calculating(FALSE)
+      
+      if (!is.null(result)) {
+        calculated_metrics(result)
+        showNotification(
+          sprintf("Successfully calculated %d metrics for %d samples", 
+                  ncol(result) - 1,
+                  nrow(result)),
+          type = "message",
+          duration = 3
+        )
+      }
     })
     
     # ---- Report Preview ----
@@ -548,26 +544,61 @@ mod_report_builder_server <- function(id, app_data) {
           div(
             class = "alert alert-info",
             icon("info-circle"), " ",
-            "Select metrics above to preview the report."
+            "Select metrics above and click 'Calculate Preview' to see results."
           )
         )
       }
       
-      # Show calculation placeholder
-      # TODO: In Session 2, we'll implement actual tlbparam calculation here
+      # Check if metrics have been calculated
+      results <- calculated_metrics()
+      if (is.null(results)) {
+        return(
+          div(
+            class = "alert alert-info",
+            icon("calculator"), " ",
+            tags$strong(length(metrics)), " metrics selected. ",
+            "Click 'Calculate Preview' to compute values."
+          )
+        )
+      }
+      
+      # Show the preview table
       tagList(
         div(
-          class = "alert alert-success",
+          class = "alert alert-success mb-3",
           icon("check-circle"), " ",
-          tags$strong(length(metrics)), " metrics selected: ",
-          paste(metrics, collapse = ", ")
+          sprintf("Showing %d metrics for %d samples", 
+                  ncol(results) - 1,
+                  nrow(results))
         ),
-        div(
-          class = "alert alert-info",
-          icon("flask"), " ",
-          "Metric calculation will be implemented in Session 2 with tlbparam integration."
-        )
+        DT::dataTableOutput(ns("metrics_preview_table"))
       )
+    })
+    
+    # Render the metrics preview table
+    output$metrics_preview_table <- DT::renderDataTable({
+      req(calculated_metrics())
+      
+      results <- calculated_metrics()
+      
+      DT::datatable(
+        results,
+        options = list(
+          pageLength = 10,
+          scrollX = TRUE,
+          scrollY = "400px",
+          dom = 'ftp',
+          columnDefs = list(
+            list(targets = 0, className = "dt-left")
+          )
+        ),
+        rownames = FALSE,
+        class = "compact hover"
+      ) %>%
+        DT::formatRound(
+          columns = 2:ncol(results),
+          digits = 3
+        )
     })
     
     # ---- Export Handlers ----

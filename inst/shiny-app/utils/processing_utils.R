@@ -1053,3 +1053,332 @@ delete_processed_data <- function(filepath) {
     ))
   })
 }
+
+# ============================================================================
+# TLBPARAM METRIC CALCULATION FUNCTIONS
+# ============================================================================
+
+#' Convert processed samples to tlbparam format
+#'
+#' @description
+#' Converts the processed_data$samples format to the wide format expected by tlbparam.
+#' Column names: T45, T45.1, T45.2, ..., T89.9, T90
+#' 
+#' @param processed_data List containing samples with baseline-subtracted data
+#' 
+#' @return Data frame in tlbparam format (wide with temperature columns)
+convert_to_tlbparam_format <- function(processed_data) {
+  
+  samples <- processed_data$samples
+  
+  if (length(samples) == 0) {
+    stop("No samples found in processed_data")
+  }
+  
+  # Define the standard temperature grid (45 to 90 by 0.1)
+  temp_grid <- seq(45, 90, by = 0.1)
+  
+  # Create column names for tlbparam format
+  # Format: T45, T45.1, T45.2, ..., T89.9, T90
+  temp_col_names <- paste0("T", temp_grid)
+  
+  cat(sprintf("[TLBPARAM] Standard grid: %d temperatures from %.1f to %.1f\n", 
+              length(temp_grid), min(temp_grid), max(temp_grid)))
+  cat(sprintf("[TLBPARAM] Column names: %s ... %s\n", 
+              temp_col_names[1], tail(temp_col_names, 1)))
+  
+  # Initialize list to store each sample's data
+  sample_list <- list()
+  
+  for (sample_id in names(samples)) {
+    sample <- samples[[sample_id]]
+    
+    # Skip failed samples
+    if (!sample$success) {
+      cat(sprintf("[TLBPARAM] Skipping failed sample: %s\n", sample_id))
+      next
+    }
+    
+    # Get baseline-subtracted data
+    temperature <- as.numeric(sample$temperature)
+    dcp_subtracted <- as.numeric(sample$baseline_subtracted)
+    
+    # Remove NAs
+    valid_idx <- !is.na(temperature) & !is.na(dcp_subtracted)
+    temperature <- temperature[valid_idx]
+    dcp_subtracted <- dcp_subtracted[valid_idx]
+    
+    if (length(temperature) < 10) {
+      cat(sprintf("[TLBPARAM] Insufficient data for sample: %s\n", sample_id))
+      next
+    }
+    
+    # Interpolate to standard grid if needed
+    # Round temperatures to nearest 0.1 to match grid
+    temperature_rounded <- round(temperature, 1)
+    
+    # Check if data is already on grid
+    if (!all(temp_grid %in% temperature_rounded)) {
+      cat(sprintf("[TLBPARAM] Interpolating sample %s to standard grid\n", sample_id))
+      
+      # Use approx for linear interpolation
+      interp_result <- approx(
+        x = temperature,
+        y = dcp_subtracted,
+        xout = temp_grid,
+        rule = 2  # Use nearest value for extrapolation
+      )
+      
+      dcp_on_grid <- interp_result$y
+    } else {
+      # Data already on grid, just reorder
+      idx_match <- match(temp_grid, temperature_rounded)
+      dcp_on_grid <- dcp_subtracted[idx_match]
+    }
+    
+    # Create data frame for this sample with proper column names
+    sample_df <- setNames(
+      data.frame(matrix(dcp_on_grid, nrow = 1), stringsAsFactors = FALSE),
+      temp_col_names
+    )
+    
+    # Add SampleCode as first column
+    sample_df <- data.frame(
+      SampleCode = sample_id,
+      sample_df,
+      stringsAsFactors = FALSE
+    )
+    
+    sample_list[[sample_id]] <- sample_df
+    cat(sprintf("[TLBPARAM] Formatted sample: %s (%d temp columns)\n", 
+                sample_id, length(temp_col_names)))
+  }
+  
+  if (length(sample_list) == 0) {
+    stop("No valid samples to process")
+  }
+  
+  # Combine all samples into one data frame
+  result_df <- do.call(rbind, sample_list)
+  rownames(result_df) <- NULL
+  
+  cat(sprintf("[TLBPARAM] Final format: %d samples x %d total columns (1 ID + %d temps)\n", 
+              nrow(result_df), ncol(result_df), length(temp_col_names)))
+  
+  # Verify column names
+  cat(sprintf("[TLBPARAM] First temp column: %s, Last temp column: %s\n",
+              names(result_df)[2], names(result_df)[ncol(result_df)]))
+  
+  return(result_df)
+}
+
+#' Calculate tlbparam metrics for processed samples
+#'
+#' @description
+#' Main function to calculate thermogram metrics using tlbparam package
+#' 
+#' @param processed_data List containing processed sample data
+#' @param selected_metrics Character vector of metric names to calculate
+#' 
+#' @return Data frame with Sample_ID and selected metric columns, or NULL if error
+calculate_tlbparam_metrics <- function(processed_data, selected_metrics = NULL) {
+  
+  cat("\n[TLBPARAM] Starting metric calculation\n")
+  cat(sprintf("[TLBPARAM] Number of samples: %d\n", length(processed_data$samples)))
+  
+  # Check if tlbparam is available
+  if (!requireNamespace("tlbparam", quietly = TRUE)) {
+    stop("tlbparam package is not installed. Install it from GitHub: remotes::install_github('BuscagliaR/tlbparam')")
+  }
+  
+  # Convert to tlbparam format
+  cat("[TLBPARAM] Converting data to tlbparam format...\n")
+  
+  tlb_data <- tryCatch({
+    convert_to_tlbparam_format(processed_data)
+  }, error = function(e) {
+    cat(sprintf("[TLBPARAM] ERROR in format conversion: %s\n", e$message))
+    return(NULL)
+  })
+  
+  if (is.null(tlb_data)) {
+    return(NULL)
+  }
+  
+  cat(sprintf("[TLBPARAM] Converted %d samples successfully\n", nrow(tlb_data)))
+  
+  # Calculate all metrics using tlbparam
+  cat("[TLBPARAM] Calling clean_thermograms()...\n")
+  
+  all_metrics <- tryCatch({
+    tlbparam::clean_thermograms(
+      df = tlb_data,
+      type = "Plasma",
+      column = "SampleCode",
+      low_temp = "T45",
+      high_temp = "T90",
+      temp_range = seq(45, 90, by = 0.1)
+    )
+  }, error = function(e) {
+    cat(sprintf("[TLBPARAM] ERROR in clean_thermograms: %s\n", e$message))
+    return(NULL)
+  })
+  
+  if (is.null(all_metrics)) {
+    return(NULL)
+  }
+  
+  cat(sprintf("[TLBPARAM] Calculated metrics for %d samples\n", nrow(all_metrics)))
+  
+  # Show available columns (excluding SampleCode)
+  metric_cols <- setdiff(names(all_metrics), "SampleCode")
+  cat(sprintf("[TLBPARAM] Available metric columns: %s\n", paste(metric_cols, collapse = ", ")))
+  cat(sprintf("[TLBPARAM] Extracted %d metrics\n", length(metric_cols)))
+  
+  # If no specific metrics selected, return all
+  if (is.null(selected_metrics) || length(selected_metrics) == 0) {
+    cat("[TLBPARAM] Returning all metrics\n")
+    
+    # Rename SampleCode to Sample_ID for consistency
+    names(all_metrics)[names(all_metrics) == "SampleCode"] <- "Sample_ID"
+    
+    return(all_metrics)
+  }
+  
+  # Map UI metric names to tlbparam column names
+  metric_map <- create_metric_name_map()
+  
+  # Select only requested metrics
+  selected_cols <- c("SampleCode")
+  found_metrics <- character(0)
+  
+  for (metric in selected_metrics) {
+    tlb_col_name <- metric_map[[metric]]
+    
+    if (is.na(tlb_col_name)) {
+      cat(sprintf("[TLBPARAM] Skipping unavailable metric: %s\n", metric))
+      next
+    }
+    
+    if (!is.null(tlb_col_name) && tlb_col_name %in% names(all_metrics)) {
+      selected_cols <- c(selected_cols, tlb_col_name)
+      found_metrics <- c(found_metrics, metric)
+      cat(sprintf("[TLBPARAM] ✓ Found: %s -> '%s'\n", metric, tlb_col_name))
+    } else {
+      cat(sprintf("[TLBPARAM] Warning: Metric '%s' (tlbparam name: '%s') not found in results\n", 
+                  metric, tlb_col_name))
+    }
+  }
+  
+  if (length(selected_cols) == 1) {
+    cat("[TLBPARAM] No valid metrics found\n")
+    return(NULL)
+  }
+  
+  # Extract selected columns
+  result <- all_metrics[, selected_cols, drop = FALSE]
+  
+  # Rename columns to match UI names
+  # Create reverse mapping
+  reverse_map <- setNames(names(metric_map), unlist(metric_map))
+  
+  for (col in names(result)) {
+    if (col != "SampleCode" && col %in% names(reverse_map)) {
+      new_name <- reverse_map[col]
+      names(result)[names(result) == col] <- new_name
+    }
+  }
+  
+  # Rename SampleCode to Sample_ID for consistency
+  names(result)[names(result) == "SampleCode"] <- "Sample_ID"
+  
+  cat(sprintf("[TLBPARAM] ✅ Returning %d metrics for %d samples\n", 
+              ncol(result) - 1, nrow(result)))
+  cat(sprintf("[TLBPARAM] Final columns: %s\n", 
+              paste(names(result), collapse = ", ")))
+  
+  return(result)
+}
+
+#' Create mapping between UI metric names and tlbparam column names
+#'
+#' @description
+#' Maps the metric names used in the UI to the actual column names
+#' returned by tlbparam::clean_thermograms()
+#' 
+#' Based on actual output:
+#' Width, Area, Max, TMax, TFM, Peak 1, Peak 2, Peak 3, 
+#' TPeak 1, TPeak 2, TPeak 3, Peak 1 / Peak 2, Peak 1 / Peak 3, 
+#' Peak 2 / Peak 3, Median, V1.2, TV1.2, V1.2 / Peak 1, 
+#' V1.2 / Peak 2, V1.2 / Peak 3, Min, TMin, Peak F, TPeak F
+#' 
+#' @return Named list mapping UI names to tlbparam names
+create_metric_name_map <- function() {
+  list(
+    # Peak Metrics
+    "Tm" = "TMax",           # Temperature at maximum
+    "Tpeak_1" = "TPeak 1",   # Peak 1 temperature
+    "Tpeak_2" = "TPeak 2",   # Peak 2 temperature
+    "Tpeak_3" = "TPeak 3",   # Peak 3 temperature
+    "Tpeak_f" = "TPeak F",   # Fibrinogen peak temperature
+    
+    # Transition Metrics
+    "Tm1" = "TPeak 1",       # Same as Tpeak_1
+    "Tm2" = "TPeak 2",       # Same as Tpeak_2
+    "Tm3" = "TPeak 3",       # Same as Tpeak_3
+    "Tonset" = "TMin",       # Onset temperature (approximation)
+    "Toffset" = "TMax",      # Offset temperature (approximation)
+    "TV12" = "TV1.2",        # Valley between peak 1 and 2
+    
+    # Area Metrics
+    "AUC" = "Area",          # Total area
+    "AUC_normalized" = "Area",  # Same as AUC
+    "Area" = "Area",         # Total area
+    
+    # Shape Metrics
+    "FWHM" = "Width",        # Full width at half maximum
+    "Width_50" = "Width",    # Same as FWHM
+    "Width_80" = "Width",    # Approximation (tlbparam doesn't have 80%)
+    "Asymmetry" = NA,        # Not available in tlbparam
+    
+    # Height Metrics
+    "Max" = "Max",           # Maximum dCp value
+    "Min" = "Min",           # Minimum dCp value
+    "Median" = "Median",     # Median dCp value
+    
+    # Temperature Metrics
+    "TMax" = "TMax",         # Temperature at maximum
+    "TMin" = "TMin",         # Temperature at minimum
+    "TFM" = "TFM",           # Temperature of first moment
+    
+    # Ratio Metrics
+    "V1.2_Peak1_Ratio" = "V1.2 / Peak 1",   # Valley/Peak 1 ratio
+    "V1.2_Peak2_Ratio" = "V1.2 / Peak 2",   # Valley/Peak 2 ratio
+    "V1.2_Peak3_Ratio" = "V1.2 / Peak 3"    # Valley/Peak 3 ratio
+  )
+}
+
+#' Get available metric names from tlbparam
+#'
+#' @description
+#' Returns list of all metrics that can be calculated
+#' 
+#' @return Character vector of metric names
+get_available_metrics <- function() {
+  c(
+    # Peak Metrics
+    "Tm", "Tpeak_1", "Tpeak_2", "Tpeak_3", "Tpeak_f",
+    # Transition Metrics
+    "Tm1", "Tm2", "Tm3", "Tonset", "Toffset", "TV12",
+    # Area Metrics
+    "AUC", "AUC_normalized", "Area",
+    # Shape Metrics
+    "FWHM", "Width_50", "Width_80",
+    # Height Metrics
+    "Max", "Min", "Median",
+    # Temperature Metrics
+    "TMax", "TMin", "TFM",
+    # Ratio Metrics (note: these need special handling)
+    "V1.2_Peak1_Ratio", "V1.2_Peak2_Ratio", "V1.2_Peak3_Ratio"
+  )
+}
