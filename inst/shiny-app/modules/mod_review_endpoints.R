@@ -636,7 +636,7 @@ mod_review_endpoints_server <- function(id, app_data) {
       }
       
       if (is.null(selected_sample())) return()
-      if (is.na(click$x)) return()
+      if (is.na(click$x) || length(click$x) == 0) return()
       
       clicked_temp <- as.numeric(click$x)
       if (is.na(clicked_temp)) return()
@@ -1393,15 +1393,100 @@ mod_review_endpoints_server <- function(id, app_data) {
     })
     
     # =========================================================================
-    # SAVE BUTTON
+    # SAVE PROCESSED DATA
     # =========================================================================
     
     observeEvent(input$save_btn, {
-      showNotification(
-        "Save functionality not yet implemented",
-        type = "warning",
-        duration = 3
+      req(app_data$processed_data)
+      
+      # Generate default filename with timestamp
+      default_filename <- format(Sys.time(), "thermogram_processed_%Y%m%d_%H%M%S")
+      
+      showModal(
+        modalDialog(
+          title = tagList(icon("save"), " Save Processed Data"),
+          size = "m",
+          
+          textInput(
+            ns("save_filename"),
+            "Filename:",
+            value = default_filename,
+            placeholder = "Enter filename without extension"
+          ),
+          
+          selectInput(
+            ns("save_format"),
+            "Format:",
+            choices = c(
+              "RDS (R Data - Full data, can reload)" = "rds",
+              "CSV (Wide format - Export only)" = "csv",
+              "Excel (Wide format + metadata - Export only)" = "xlsx"
+            ),
+            selected = "rds"
+          ),
+          
+          div(
+            class = "alert alert-info mt-3",
+            icon("info-circle"), 
+            strong(" Format Information:"),
+            tags$ul(
+              tags$li(strong("RDS:"), " Saves complete data including all sample curves, can be reloaded into app"),
+              tags$li(strong("CSV/Excel:"), " Saves wide-format interpolated data (Temperature as columns, samples as rows), cannot be reloaded")
+            )
+          ),
+          
+          footer = tagList(
+            modalButton("Cancel"),
+            actionButton(ns("confirm_save"), "Save", class = "btn-primary", icon = icon("save"))
+          ),
+          easyClose = FALSE
+        )
       )
+    })
+    
+    observeEvent(input$confirm_save, {
+      filename <- trimws(input$save_filename)
+      format <- input$save_format
+      
+      # Validate filename
+      if (filename == "" || is.null(filename)) {
+        showNotification(
+          "Please enter a filename",
+          type = "error",
+          duration = 3
+        )
+        return()
+      }
+      
+      # Remove any existing extension if user added one
+      filename <- gsub("\\.(rds|csv|xlsx)$", "", filename, ignore.case = TRUE)
+      
+      cat(sprintf("[SAVE] Attempting to save as %s format: %s\n", format, filename))
+      
+      # Call save function from processing_utils.R
+      result <- save_processed_data(
+        data = app_data$processed_data,
+        filename = filename,
+        format = format
+      )
+      
+      if (result$success) {
+        showNotification(
+          result$message,
+          type = "message",
+          duration = 5
+        )
+        cat(sprintf("[SAVE] Success: %s\n", result$filepath))
+      } else {
+        showNotification(
+          result$message,
+          type = "error",
+          duration = 5
+        )
+        cat(sprintf("[SAVE] Failed: %s\n", result$message))
+      }
+      
+      removeModal()
     })
     
   })
