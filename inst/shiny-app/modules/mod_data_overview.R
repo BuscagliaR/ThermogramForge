@@ -152,7 +152,24 @@ mod_data_overview_ui <- function(id) {
           ),
           uiOutput(ns("saved_files_ui"))
         )
-      )
+      ),
+      div(
+        class = "card mt-3",
+        div(
+          class = "card-header",
+          icon("file-chart-line"), " Generated Reports"
+        ),
+        div(
+          class = "card-body",
+          p(
+            class = "text-muted",
+            icon("info-circle"),
+            " Reports generated during this session. ",
+            "Download or delete reports as needed."
+          ),
+          uiOutput(ns("generated_reports_list"))
+        )
+      ),
     )
   )
 }
@@ -216,7 +233,9 @@ mod_data_overview_server <- function(id, app_data) {
     })
     
     output$reports_count <- renderText({
-      "0"
+      reports <- app_data$generated_reports
+      if (length(reports) == 0) return("0")
+      as.character(length(reports))
     })
     
     # =========================================================================
@@ -779,18 +798,11 @@ mod_data_overview_server <- function(id, app_data) {
         current_datasets[[length(current_datasets) + 1]] <- new_dataset
         uploaded_datasets(current_datasets)
         
-        # ===== ADDED FOR BUG FIX =====
         # Set processed data for immediate use
         app_data$processed_data <- result$data
         app_data$current_dataset_id <- new_dataset$id
         app_data$current_dataset_name <- filename
         app_data$dataset_load_trigger <- isolate(app_data$dataset_load_trigger) + 1
-        
-        # Navigate based on data type
-        if (result$data_type == "full") {
-          app_data$navigate_to <- "review_endpoints"
-        }
-        # =============================
         
         showNotification(result$message, type = "message", duration = 5)
         cat(sprintf("[LOAD] Successfully added to datasets list\n"))
@@ -865,6 +877,251 @@ mod_data_overview_server <- function(id, app_data) {
       removeModal()
       session$userData$delete_filepath <- NULL
     })
+
+    # ---- Generated Reports Display (Phase 8) ----
     
+    # Track which report to download (for downloadHandler)
+    report_to_download <- reactiveVal(NULL)
+    
+    output$generated_reports_list <- renderUI({
+      
+      # Access the generated reports from app_data
+      reports <- app_data$generated_reports
+      
+      if (length(reports) == 0) {
+        return(
+          div(
+            class = "alert alert-info",
+            icon("info-circle"), " ",
+            "No reports have been generated yet. Use the Report Builder to create reports."
+          )
+        )
+      }
+      
+      # Sort reports by generation time (most recent first)
+      reports_sorted <- reports[order(
+        sapply(reports, function(r) as.POSIXct(r$generated_at)),
+        decreasing = TRUE
+      )]
+      
+      # Create UI for each report
+      report_cards <- lapply(reports_sorted, function(report) {
+        
+        # Format timestamp
+        timestamp <- format(report$generated_at, "%Y-%m-%d %H:%M:%S")
+        
+        # Format badge based on format
+        format_badge <- switch(
+          report$format,
+          "csv" = "badge bg-primary",
+          "xlsx" = "badge bg-success",
+          "badge bg-secondary"
+        )
+        
+        div(
+          class = "card mb-2",
+          div(
+            class = "card-body p-3",
+            div(
+              class = "d-flex justify-content-between align-items-center",
+              div(
+                class = "flex-grow-1",
+                div(
+                  icon("file-chart-line"), " ",
+                  strong(report$name),
+                  tags$span(class = sprintf("%s ms-2", format_badge), toupper(report$format))
+                ),
+                div(
+                  class = "small text-muted mt-1",
+                  sprintf(
+                    "Dataset: %s | %d samples, %d metrics | Generated: %s",
+                    report$dataset_name,
+                    report$n_samples,
+                    report$n_metrics,
+                    timestamp
+                  )
+                )
+              ),
+              div(
+                class = "flex-shrink-0",
+                div(
+                  class = "btn-group",
+                  downloadLink(
+                    ns(paste0("download_report_", report$id)),
+                    label = tagList(icon("download"), " Download"),
+                    class = "btn btn-info btn-sm"
+                  ),
+                  actionButton(
+                    ns(paste0("delete_report_", report$id)),
+                    "Delete",
+                    icon = icon("trash"),
+                    class = "btn-danger btn-sm"
+                  )
+                )
+              )
+            )
+          )
+        )
+      })
+      
+      tagList(report_cards)
+    })
+    
+    # ---- Dynamic Download Handlers ----
+    
+    observe({
+      reports <- app_data$generated_reports
+      
+      if (length(reports) == 0) return()
+      
+      # Create download handlers for each report
+      lapply(reports, function(report) {
+        
+        download_id <- paste0("download_report_", report$id)
+        
+        # Check if handler already exists
+        if (download_id %in% created_observers()) return()
+        
+        output[[download_id]] <- downloadHandler(
+          filename = function() {
+            basename(report$filepath)
+          },
+          content = function(file) {
+            cat(sprintf("\n[DATA_OVERVIEW] Downloading report: %s\n", report$name))
+            
+            if (!file.exists(report$filepath)) {
+              showNotification(
+                sprintf("Report file not found: %s", basename(report$filepath)),
+                type = "error",
+                duration = 5
+              )
+              return()
+            }
+            
+            # Copy file to download location
+            file.copy(report$filepath, file, overwrite = TRUE)
+            
+            cat(sprintf("[DATA_OVERVIEW] ✅ Report downloaded: %s\n", basename(report$filepath)))
+          }
+        )
+        
+        # Mark as created
+        created_observers(c(created_observers(), download_id))
+      })
+    })
+    
+    # ---- Dynamic Report Delete Handlers ----
+    
+    observe({
+      reports <- app_data$generated_reports
+      
+      if (length(reports) == 0) return()
+      
+      lapply(reports, function(report) {
+        
+        button_id <- paste0("delete_report_", report$id)
+        
+        # Check if observer already exists
+        observer_key <- paste0("delete_obs_", report$id)
+        if (observer_key %in% created_observers()) return()
+        
+        observeEvent(input[[button_id]], {
+          
+          cat(sprintf("\n[DATA_OVERVIEW] Delete report button clicked: %s\n", report$id))
+          
+          # Show confirmation modal
+          showModal(
+            modalDialog(
+              title = "Delete Report",
+              div(
+                p(strong("Are you sure you want to delete this report?")),
+                p(sprintf("Report: %s", report$name)),
+                p(sprintf("Format: %s", toupper(report$format))),
+                p(sprintf("File: %s", basename(report$filepath))),
+                div(
+                  class = "alert alert-warning",
+                  icon("exclamation-triangle"), " ",
+                  "This action cannot be undone."
+                )
+              ),
+              footer = tagList(
+                modalButton("Cancel"),
+                actionButton(
+                  ns(paste0("confirm_delete_report_", report$id)),
+                  "Delete Report",
+                  class = "btn-danger",
+                  icon = icon("trash")
+                )
+              ),
+              easyClose = TRUE
+            )
+          )
+          
+        }, ignoreInit = TRUE)
+        
+        # Mark as created
+        created_observers(c(created_observers(), observer_key))
+      })
+    })
+    
+    # ---- Confirm Delete Report ----
+    
+    observe({
+      reports <- app_data$generated_reports
+      
+      if (length(reports) == 0) return()
+      
+      lapply(reports, function(report) {
+        
+        button_id <- paste0("confirm_delete_report_", report$id)
+        
+        # Check if observer already exists
+        observer_key <- paste0("confirm_delete_obs_", report$id)
+        if (observer_key %in% created_observers()) return()
+        
+        observeEvent(input[[button_id]], {
+          
+          cat(sprintf("\n[DATA_OVERVIEW] Confirming delete for report: %s\n", report$id))
+          
+          # Try to delete the file
+          if (file.exists(report$filepath)) {
+            tryCatch({
+              file.remove(report$filepath)
+              cat(sprintf("[DATA_OVERVIEW] ✅ Deleted file: %s\n", report$filepath))
+            }, error = function(e) {
+              cat(sprintf("[DATA_OVERVIEW] ❌ Error deleting file: %s\n", e$message))
+              showNotification(
+                sprintf("Error deleting file: %s", e$message),
+                type = "error",
+                duration = 5
+              )
+              return()
+            })
+          }
+          
+          # Remove from app_data
+          app_data$generated_reports[[report$id]] <- NULL
+          
+          cat(sprintf("[DATA_OVERVIEW] Report removed from session\n"))
+          cat(sprintf("[DATA_OVERVIEW] Remaining reports: %d\n", 
+                      length(app_data$generated_reports)))
+          
+          # Close modal
+          removeModal()
+          
+          # Show success notification
+          showNotification(
+            sprintf("Report deleted: %s", report$name),
+            type = "message",
+            duration = 3
+          )
+          
+        }, ignoreInit = TRUE)
+        
+        # Mark as created
+        created_observers(c(created_observers(), observer_key))
+      })
+    })
+    NULL
   })
 }
