@@ -458,8 +458,11 @@ mod_report_builder_server <- function(id, app_data) {
       showNotification("Reset to default metrics", type = "message")
     })
     
-    # Calculate Preview
+    # ---- Calculate Preview Button Handler ----
+    
     observeEvent(input$calculate_preview, {
+      
+      cat("\n[REPORT_BUILDER] Calculate preview button clicked\n")
       
       # Check if data is loaded
       if (is.null(app_data$processed_data)) {
@@ -520,6 +523,205 @@ mod_report_builder_server <- function(id, app_data) {
           duration = 3
         )
       }
+    })
+    
+    # ---- CSV Export Handler ----
+    
+    observeEvent(input$export_csv, {
+      
+      cat("\n[REPORT_BUILDER] CSV export button clicked\n")
+      
+      # Validate that metrics have been calculated
+      metrics <- calculated_metrics()
+      
+      if (is.null(metrics)) {
+        showNotification(
+          "Please calculate metrics first using the 'Calculate Preview' button.",
+          type = "warning",
+          duration = 5
+        )
+        return()
+      }
+      
+      if (nrow(metrics) == 0) {
+        showNotification(
+          "No metric data available to export.",
+          type = "warning",
+          duration = 5
+        )
+        return()
+      }
+      
+      # Get report name (optional)
+      report_name <- trimws(input$report_name)
+      
+      # Get dataset name
+      dataset_name <- if (!is.null(app_data$current_dataset_name)) {
+        app_data$current_dataset_name
+      } else {
+        "Unknown_Dataset"
+      }
+      
+      cat(sprintf("[REPORT_BUILDER] Exporting %d samples, %d metrics\n",
+                  nrow(metrics), ncol(metrics) - 1))
+      cat(sprintf("[REPORT_BUILDER] Report name: '%s'\n", 
+                  ifelse(nchar(report_name) > 0, report_name, "(auto-generated)")))
+      
+      # Call export function
+      result <- export_report_csv(
+        metrics_data = metrics,
+        report_name = report_name,
+        dataset_name = dataset_name
+      )
+      
+      if (result$success) {
+        
+        # Generate unique report ID
+        report_id <- paste0("report_", format(Sys.time(), "%Y%m%d_%H%M%S"))
+        
+        # Store report metadata
+        new_report <- list(
+          id = report_id,
+          name = tools::file_path_sans_ext(result$filename),
+          format = "csv",
+          filepath = result$filepath,
+          dataset_name = dataset_name,
+          n_samples = nrow(metrics),
+          n_metrics = ncol(metrics) - 1,  # Exclude Sample_ID column
+          generated_at = Sys.time()
+        )
+        
+        # Add to app_data
+        app_data$generated_reports[[report_id]] <- new_report
+        
+        cat(sprintf("[REPORT_BUILDER] ✅ Report metadata stored (ID: %s)\n", report_id))
+        cat(sprintf("[REPORT_BUILDER] Total reports in history: %d\n", 
+                    length(app_data$generated_reports)))
+        
+        # Show success notification
+        showNotification(
+          ui = tagList(
+            icon("check-circle"), " ",
+            tags$strong("CSV Report Generated!"), tags$br(),
+            sprintf("File: %s", result$filename), tags$br(),
+            sprintf("Location: reports/")
+          ),
+          type = "message",
+          duration = 8
+        )
+        
+        # Clear report name input for next export
+        updateTextInput(session, "report_name", value = "")
+        
+      } else {
+        # Show error notification
+        showNotification(
+          sprintf("Export failed: %s", result$message),
+          type = "error",
+          duration = 10
+        )
+      }
+      
+    })
+    
+    # ---- Excel Export Handler ----
+    
+    observeEvent(input$export_excel, {
+      
+      cat("\n[REPORT_BUILDER] Excel export button clicked\n")
+      
+      # Validate that metrics have been calculated
+      metrics <- calculated_metrics()
+      
+      if (is.null(metrics)) {
+        showNotification(
+          "Please calculate metrics first using the 'Calculate Preview' button.",
+          type = "warning",
+          duration = 5
+        )
+        return()
+      }
+      
+      if (nrow(metrics) == 0) {
+        showNotification(
+          "No metric data available to export.",
+          type = "warning",
+          duration = 5
+        )
+        return()
+      }
+      
+      # Get report name (optional)
+      report_name <- trimws(input$report_name)
+      
+      # Get dataset name
+      dataset_name <- if (!is.null(app_data$current_dataset_name)) {
+        app_data$current_dataset_name
+      } else {
+        "Unknown_Dataset"
+      }
+      
+      cat(sprintf("[REPORT_BUILDER] Exporting %d samples, %d metrics to Excel\n",
+                  nrow(metrics), ncol(metrics) - 1))
+      cat(sprintf("[REPORT_BUILDER] Report name: '%s'\n", 
+                  ifelse(nchar(report_name) > 0, report_name, "(auto-generated)")))
+      
+      # Call export function
+      result <- export_report_excel(
+        metrics_data = metrics,
+        report_name = report_name,
+        dataset_name = dataset_name
+      )
+      
+      if (result$success) {
+        
+        # Generate unique report ID
+        report_id <- paste0("report_", format(Sys.time(), "%Y%m%d_%H%M%S"))
+        
+        # Store report metadata
+        new_report <- list(
+          id = report_id,
+          name = tools::file_path_sans_ext(result$filename),
+          format = "xlsx",
+          filepath = result$filepath,
+          dataset_name = dataset_name,
+          n_samples = nrow(metrics),
+          n_metrics = ncol(metrics) - 1,  # Exclude Sample_ID column
+          generated_at = Sys.time()
+        )
+        
+        # Add to app_data
+        app_data$generated_reports[[report_id]] <- new_report
+        
+        cat(sprintf("[REPORT_BUILDER] ✅ Report metadata stored (ID: %s)\n", report_id))
+        cat(sprintf("[REPORT_BUILDER] Total reports in history: %d\n", 
+                    length(app_data$generated_reports)))
+        
+        # Show success notification
+        showNotification(
+          ui = tagList(
+            icon("check-circle"), " ",
+            tags$strong("Excel Report Generated!"), tags$br(),
+            sprintf("File: %s", result$filename), tags$br(),
+            sprintf("Location: reports/"), tags$br(),
+            tags$small("Contains 2 sheets: Metrics + Metadata")
+          ),
+          type = "message",
+          duration = 10
+        )
+        
+        # Clear report name input for next export
+        updateTextInput(session, "report_name", value = "")
+        
+      } else {
+        # Show error notification
+        showNotification(
+          sprintf("Export failed: %s", result$message),
+          type = "error",
+          duration = 10
+        )
+      }
+      
     })
     
     # ---- Report Preview ----
@@ -601,29 +803,11 @@ mod_report_builder_server <- function(id, app_data) {
         )
     })
     
-    # ---- Export Handlers ----
+    # ---- Export Status Display ----
     
     output$export_status_display <- renderUI({
       # Placeholder for export status messages
       NULL
-    })
-    
-    # CSV Export
-    observeEvent(input$export_csv, {
-      showNotification(
-        "CSV export will be implemented in Session 3",
-        type = "message",
-        duration = 3
-      )
-    })
-    
-    # Excel Export
-    observeEvent(input$export_excel, {
-      showNotification(
-        "Excel export will be implemented in Session 3",
-        type = "message",
-        duration = 3
-      )
     })
     
     # ---- Return nothing ----

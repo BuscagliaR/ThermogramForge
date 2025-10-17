@@ -1382,3 +1382,239 @@ get_available_metrics <- function() {
     "V1.2_Peak1_Ratio", "V1.2_Peak2_Ratio", "V1.2_Peak3_Ratio"
   )
 }
+
+# ============================================================================
+# CSV REPORT EXPORT FUNCTION
+# Phase 8 - Session 3
+# ============================================================================
+
+#' Export calculated metrics to CSV
+#'
+#' @description
+#' Saves calculated metrics data frame to a CSV file in the reports/ directory
+#'
+#' @param metrics_data Data frame with Sample_ID and metric columns
+#' @param report_name User-provided report name (optional)
+#' @param dataset_name Name of the source dataset
+#'
+#' @return List containing:
+#'   - success: logical indicating if save succeeded
+#'   - filepath: full path to saved file (if successful)
+#'   - filename: just the filename (if successful)
+#'   - message: status message
+#'
+#' @export
+export_report_csv <- function(metrics_data, report_name = NULL, dataset_name = "Unknown") {
+  
+  cat("\n[CSV_EXPORT] Starting CSV export\n")
+  
+  # Validate inputs
+  if (is.null(metrics_data) || nrow(metrics_data) == 0) {
+    return(list(
+      success = FALSE,
+      message = "No data to export"
+    ))
+  }
+  
+  # Create reports directory if it doesn't exist
+  reports_dir <- "reports"
+  if (!dir.exists(reports_dir)) {
+    dir.create(reports_dir, recursive = TRUE)
+    cat(sprintf("[CSV_EXPORT] Created directory: %s\n", reports_dir))
+  }
+  
+  # Generate filename
+  if (is.null(report_name) || nchar(trimws(report_name)) == 0) {
+    # Auto-generate name with timestamp
+    timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    filename <- sprintf("Report_%s.csv", timestamp)
+    cat("[CSV_EXPORT] Using auto-generated filename\n")
+  } else {
+    # Use provided name (sanitize it)
+    clean_name <- gsub("[^A-Za-z0-9_-]", "_", report_name)
+    filename <- sprintf("%s.csv", clean_name)
+    cat(sprintf("[CSV_EXPORT] Using custom filename: %s\n", filename))
+  }
+  
+  filepath <- file.path(reports_dir, filename)
+  
+  # Check if file already exists
+  if (file.exists(filepath)) {
+    # Add timestamp to make unique
+    timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    base_name <- tools::file_path_sans_ext(filename)
+    filename <- sprintf("%s_%s.csv", base_name, timestamp)
+    filepath <- file.path(reports_dir, filename)
+    cat(sprintf("[CSV_EXPORT] File exists, using unique name: %s\n", filename))
+  }
+  
+  # Write CSV
+  tryCatch({
+    readr::write_csv(metrics_data, filepath)
+    
+    cat(sprintf("[CSV_EXPORT] ✅ Successfully saved to: %s\n", filepath))
+    cat(sprintf("[CSV_EXPORT] Exported %d samples, %d metrics\n", 
+                nrow(metrics_data), 
+                ncol(metrics_data) - 1))  # -1 for Sample_ID column
+    
+    return(list(
+      success = TRUE,
+      filepath = filepath,
+      filename = filename,
+      message = sprintf("Report saved: %s", filename)
+    ))
+    
+  }, error = function(e) {
+    cat(sprintf("[CSV_EXPORT] ❌ Error: %s\n", e$message))
+    return(list(
+      success = FALSE,
+      message = sprintf("Error saving CSV: %s", e$message)
+    ))
+  })
+}
+
+# ============================================================================
+# EXCEL REPORT EXPORT FUNCTION
+# Phase 8 - Session 3
+# ============================================================================
+
+#' Export calculated metrics to Excel with metadata
+#'
+#' @description
+#' Saves calculated metrics data frame to an Excel file with multiple sheets:
+#' - Sheet 1: Metrics data
+#' - Sheet 2: Metadata (dataset info, generation time, metric list)
+#'
+#' @param metrics_data Data frame with Sample_ID and metric columns
+#' @param report_name User-provided report name (optional)
+#' @param dataset_name Name of the source dataset
+#'
+#' @return List containing:
+#'   - success: logical indicating if save succeeded
+#'   - filepath: full path to saved file (if successful)
+#'   - filename: just the filename (if successful)
+#'   - message: status message
+#'
+#' @export
+export_report_excel <- function(metrics_data, report_name = NULL, dataset_name = "Unknown") {
+  
+  cat("\n[EXCEL_EXPORT] Starting Excel export\n")
+  
+  # Validate inputs
+  if (is.null(metrics_data) || nrow(metrics_data) == 0) {
+    return(list(
+      success = FALSE,
+      message = "No data to export"
+    ))
+  }
+  
+  # Check if writexl is available
+  if (!requireNamespace("writexl", quietly = TRUE)) {
+    return(list(
+      success = FALSE,
+      message = "writexl package is required for Excel export"
+    ))
+  }
+  
+  # Create reports directory if it doesn't exist
+  reports_dir <- "reports"
+  if (!dir.exists(reports_dir)) {
+    dir.create(reports_dir, recursive = TRUE)
+    cat(sprintf("[EXCEL_EXPORT] Created directory: %s\n", reports_dir))
+  }
+  
+  # Generate filename
+  if (is.null(report_name) || nchar(trimws(report_name)) == 0) {
+    # Auto-generate name with timestamp
+    timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    filename <- sprintf("Report_%s.xlsx", timestamp)
+    cat("[EXCEL_EXPORT] Using auto-generated filename\n")
+  } else {
+    # Use provided name (sanitize it)
+    clean_name <- gsub("[^A-Za-z0-9_-]", "_", report_name)
+    filename <- sprintf("%s.xlsx", clean_name)
+    cat(sprintf("[EXCEL_EXPORT] Using custom filename: %s\n", filename))
+  }
+  
+  filepath <- file.path(reports_dir, filename)
+  
+  # Check if file already exists
+  if (file.exists(filepath)) {
+    # Add timestamp to make unique
+    timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    base_name <- tools::file_path_sans_ext(filename)
+    filename <- sprintf("%s_%s.xlsx", base_name, timestamp)
+    filepath <- file.path(reports_dir, filename)
+    cat(sprintf("[EXCEL_EXPORT] File exists, using unique name: %s\n", filename))
+  }
+  
+  # Create metadata sheet
+  metric_names <- setdiff(names(metrics_data), "Sample_ID")
+  
+  metadata_sheet <- data.frame(
+    Property = c(
+      "Report Generated",
+      "Source Dataset",
+      "Number of Samples",
+      "Number of Metrics",
+      "Metrics Included",
+      "",
+      "Metric List:"
+    ),
+    Value = c(
+      format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+      dataset_name,
+      as.character(nrow(metrics_data)),
+      as.character(length(metric_names)),
+      paste(metric_names, collapse = ", "),
+      "",
+      ""
+    ),
+    stringsAsFactors = FALSE
+  )
+  
+  # Add individual metric names to metadata
+  for (i in seq_along(metric_names)) {
+    metadata_sheet <- rbind(
+      metadata_sheet,
+      data.frame(
+        Property = sprintf("  %d.", i),
+        Value = metric_names[i],
+        stringsAsFactors = FALSE
+      )
+    )
+  }
+  
+  cat(sprintf("[EXCEL_EXPORT] Created metadata with %d entries\n", nrow(metadata_sheet)))
+  
+  # Write Excel file with multiple sheets
+  tryCatch({
+    writexl::write_xlsx(
+      list(
+        Metrics = metrics_data,
+        Metadata = metadata_sheet
+      ),
+      path = filepath
+    )
+    
+    cat(sprintf("[EXCEL_EXPORT] ✅ Successfully saved to: %s\n", filepath))
+    cat(sprintf("[EXCEL_EXPORT] Sheet 1 (Metrics): %d samples x %d metrics\n", 
+                nrow(metrics_data), 
+                length(metric_names)))
+    cat(sprintf("[EXCEL_EXPORT] Sheet 2 (Metadata): %d rows\n", nrow(metadata_sheet)))
+    
+    return(list(
+      success = TRUE,
+      filepath = filepath,
+      filename = filename,
+      message = sprintf("Report saved: %s", filename)
+    ))
+    
+  }, error = function(e) {
+    cat(sprintf("[EXCEL_EXPORT] ❌ Error: %s\n", e$message))
+    return(list(
+      success = FALSE,
+      message = sprintf("Error saving Excel: %s", e$message)
+    ))
+  })
+}
