@@ -798,18 +798,11 @@ mod_data_overview_server <- function(id, app_data) {
         current_datasets[[length(current_datasets) + 1]] <- new_dataset
         uploaded_datasets(current_datasets)
         
-        # ===== ADDED FOR BUG FIX =====
         # Set processed data for immediate use
         app_data$processed_data <- result$data
         app_data$current_dataset_id <- new_dataset$id
         app_data$current_dataset_name <- filename
         app_data$dataset_load_trigger <- isolate(app_data$dataset_load_trigger) + 1
-        
-        # Navigate based on data type
-        if (result$data_type == "full") {
-          app_data$navigate_to <- "review_endpoints"
-        }
-        # =============================
         
         showNotification(result$message, type = "message", duration = 5)
         cat(sprintf("[LOAD] Successfully added to datasets list\n"))
