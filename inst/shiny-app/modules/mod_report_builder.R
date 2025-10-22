@@ -1,37 +1,52 @@
 # ==============================================================================
-# Report Builder Module
+# Report Builder Module - COMPLETE Production Version
 # ==============================================================================
-# Purpose: Generate reports with tlbparam metrics for thermal liquid biopsy data
-# 
-# Features:
-#   - Interactive metric selection organized by category
-#   - Real-time metric calculation using tlbparam package
-#   - Preview table showing calculated metrics
-#   - Export to CSV and Excel formats
-#   - Direct download and save-to-disk options
 #
-# Data Flow:
+# PURPOSE:
+#   Generate comprehensive thermogram metric reports using tlbparam package
+#   for thermal liquid biopsy (TLB) analysis
+#
+# FEATURES:
+#   - Interactive metric selection organized by category (6 categories, 24 metrics)
+#   - Real-time metric calculation using tlbparam::clean_thermograms()
+#   - Preview table showing calculated metrics with DT DataTables
+#   - Export to CSV and Excel formats (both download and save-to-disk)
+#   - Automatic exclusion of samples marked with excluded=TRUE
+#   - Data hash tracking to detect when regeneration needed
+#   - Tooltips explaining each metric on hover
+#   - Responsive layout with sticky metric selection
+#   - Clear distinction between download (browser) and save (reports/ folder)
+#
+# DATA FLOW:
 #   1. User selects metrics from organized categories
 #   2. Click "Generate Report" to calculate using tlbparam
-#   3. Preview table displays results
-#   4. Export to CSV/Excel (saves to reports/ directory)
-#   5. Direct download option also available
+#   3. Excluded samples automatically filtered out before calculation
+#   4. Preview table displays results (non-excluded samples only)
+#   5. Export to CSV/Excel (saves to reports/ directory for tracking)
+#   6. Direct download option also available (custom location)
 #
-# Dependencies:
-#   - tlbparam package for metric calculations
-#   - app_data$processed_data must be loaded
-#   - processing_utils.R for export functions
+# DEPENDENCIES:
+#   - tlbparam package: Metric calculations
+#     Install: remotes::install_github('BuscagliaR/tlbparam')
+#   - digest package: MD5 hashing for change detection
+#   - app_data$processed_data: Must contain baseline-subtracted thermogram data
+#   - processing_utils.R: calculate_tlbparam_metrics(), export functions
+#
+# KEY FUNCTIONS:
+#   - mod_report_builder_ui(): Creates user interface with metric selection
+#   - mod_report_builder_server(): Handles calculations and exports
+#   - calculate_data_hash(): Detects data changes requiring regeneration
+#   - get_selected_metrics(): Collects user metric selections
+#
+# AUTHOR: Chris Reger
+# LAST UPDATED: October 18, 2025
 # ==============================================================================
+
+library(digest)  # For data hashing
 
 # ------------------------------------------------------------------------------
 # UI Function
 # ------------------------------------------------------------------------------
-#' Report Builder User Interface
-#'
-#' Creates the UI for metric selection and report generation
-#'
-#' @param id Module namespace ID
-#' @return Shiny UI elements
 mod_report_builder_ui <- function(id) {
   ns <- NS(id)
   
@@ -40,9 +55,8 @@ mod_report_builder_ui <- function(id) {
       class = "container-fluid p-3",
       
       # ========================================================================
-      # Dataset Information Card
+      # Dataset Information Card (Compact)
       # ========================================================================
-      # Shows which dataset is currently loaded and ready for analysis
       div(
         class = "card mb-3",
         div(
@@ -50,352 +64,107 @@ mod_report_builder_ui <- function(id) {
           icon("database"), " Dataset Information"
         ),
         div(
-          class = "card-body",
+          class = "card-body py-2",
           uiOutput(ns("dataset_info_display"))
         )
       ),
       
       # ========================================================================
-      # Metric Selection Card
+      # Main Layout: Side-by-Side Columns
       # ========================================================================
-      # Organized by category with individual All/None buttons per category
       div(
-        class = "card mb-3",
+        class = "row",
+        
+        # LEFT COLUMN: Metric Selection (40% width)
+        # ======================================================================
         div(
-          class = "card-header bg-info text-white",
-          icon("list-check"), " Select Metrics to Calculate"
-        ),
-        div(
-          class = "card-body",
+          class = "col-md-5",
           
-          # Global control buttons for all metrics
           div(
-            class = "mb-3",
-            actionButton(
-              ns("select_all_metrics"),
-              "Select All",
-              icon = icon("check-double"),
-              class = "btn-success btn-sm me-2"
-            ),
-            actionButton(
-              ns("clear_all_metrics"),
-              "Clear All",
-              icon = icon("xmark"),
-              class = "btn-secondary btn-sm me-2"
-            ),
-            actionButton(
-              ns("reset_to_defaults"),
-              "Reset to Defaults",
-              icon = icon("rotate-left"),
-              class = "btn-outline-primary btn-sm me-2"
-            ),
-            # Dynamic button - changes based on whether metrics calculated
-            uiOutput(ns("calculate_button_ui"))
-          ),
-          
-          hr(),
-          
-          # Three-column layout for metric categories
-          div(
-            class = "row",
+            class = "card mb-3 sticky-top",
+            style = "top: 70px;",  # Account for navbar height
             
-            # ==================================================================
-            # Column 1: Peak and Transition Metrics
-            # ==================================================================
             div(
-              class = "col-md-4",
-              
-              # Peak Metrics
-              # Temperatures where major peaks occur in thermogram
+              class = "card-header bg-info text-white d-flex justify-content-between align-items-center",
+              div(icon("list-check"), " Select Metrics"),
               div(
-                class = "card mb-3",
-                div(
-                  class = "card-header d-flex justify-content-between align-items-center",
-                  tags$strong("Peak Metrics"),
-                  # Category-specific controls
-                  div(
-                    class = "btn-group btn-group-sm",
-                    actionButton(
-                      ns("select_all_peak"),
-                      "All",
-                      class = "btn-outline-success btn-xs",
-                      style = "font-size: 0.75rem; padding: 0.15rem 0.4rem;"
-                    ),
-                    actionButton(
-                      ns("clear_all_peak"),
-                      "None",
-                      class = "btn-outline-secondary btn-xs",
-                      style = "font-size: 0.75rem; padding: 0.15rem 0.4rem;"
-                    )
-                  )
+                class = "btn-group btn-group-sm",
+                actionButton(
+                  ns("select_all_metrics"),
+                  "All",
+                  class = "btn-light btn-sm"
                 ),
-                div(
-                  class = "card-body",
-                  checkboxGroupInput(
-                    ns("metrics_peak"),
-                    label = NULL,
-                    choices = c(
-                      "Melting Temperature (Tm)" = "Tm",
-                      "Peak 1 Temperature (TPeak 1)" = "Tpeak_1",
-                      "Peak 2 Temperature (TPeak 2)" = "Tpeak_2",
-                      "Peak 3 Temperature (TPeak 3)" = "Tpeak_3",
-                      "Fibrinogen Peak Temp (TPeak F)" = "Tpeak_f"
-                    ),
-                    selected = c("Tm", "Tpeak_1", "Tpeak_2")
-                  )
-                )
-              ),
-              
-              # Transition Metrics
-              # Temperatures at specific transition points
-              div(
-                class = "card mb-3",
-                div(
-                  class = "card-header d-flex justify-content-between align-items-center",
-                  tags$strong("Transition Metrics"),
-                  div(
-                    class = "btn-group btn-group-sm",
-                    actionButton(
-                      ns("select_all_transition"),
-                      "All",
-                      class = "btn-outline-success btn-xs",
-                      style = "font-size: 0.75rem; padding: 0.15rem 0.4rem;"
-                    ),
-                    actionButton(
-                      ns("clear_all_transition"),
-                      "None",
-                      class = "btn-outline-secondary btn-xs",
-                      style = "font-size: 0.75rem; padding: 0.15rem 0.4rem;"
-                    )
-                  )
+                actionButton(
+                  ns("clear_all_metrics"),
+                  "None",
+                  class = "btn-light btn-sm"
                 ),
-                div(
-                  class = "card-body",
-                  checkboxGroupInput(
-                    ns("metrics_transition"),
-                    label = NULL,
-                    choices = c(
-                      "Transition 1 Temperature" = "Tm1",
-                      "Transition 2 Temperature" = "Tm2",
-                      "Transition 3 Temperature" = "Tm3",
-                      "Valley Temperature (TV1.2)" = "TV12"
-                    ),
-                    selected = c("Tm1", "Tm2")
-                  )
+                actionButton(
+                  ns("reset_to_defaults"),
+                  "Defaults",
+                  class = "btn-outline-light btn-sm"
                 )
               )
             ),
             
-            # ==================================================================
-            # Column 2: Area, Shape, and Height Metrics
-            # ==================================================================
             div(
-              class = "col-md-4",
+              class = "card-body",
+              style = "max-height: calc(100vh - 200px); overflow-y: auto;",
               
-              # Area Metrics
-              # Total area under thermogram curve
+              # Info message
               div(
-                class = "card mb-3",
-                div(
-                  class = "card-header d-flex justify-content-between align-items-center",
-                  tags$strong("Area Metrics"),
-                  div(
-                    class = "btn-group btn-group-sm",
-                    actionButton(
-                      ns("select_all_area"),
-                      "All",
-                      class = "btn-outline-success btn-xs",
-                      style = "font-size: 0.75rem; padding: 0.15rem 0.4rem;"
-                    ),
-                    actionButton(
-                      ns("clear_all_area"),
-                      "None",
-                      class = "btn-outline-secondary btn-xs",
-                      style = "font-size: 0.75rem; padding: 0.15rem 0.4rem;"
-                    )
-                  )
-                ),
-                div(
-                  class = "card-body",
-                  checkboxGroupInput(
-                    ns("metrics_area"),
-                    label = NULL,
-                    choices = c(
-                      "Area Under Curve" = "AUC",
-                      "Total Area" = "Area"
-                    ),
-                    selected = c("AUC")
-                  )
-                )
-              ),
-              
-              # Shape Metrics
-              # Characteristics of thermogram shape
-              div(
-                class = "card mb-3",
-                div(
-                  class = "card-header d-flex justify-content-between align-items-center",
-                  tags$strong("Shape Metrics"),
-                  div(
-                    class = "btn-group btn-group-sm",
-                    actionButton(
-                      ns("select_all_shape"),
-                      "All",
-                      class = "btn-outline-success btn-xs",
-                      style = "font-size: 0.75rem; padding: 0.15rem 0.4rem;"
-                    ),
-                    actionButton(
-                      ns("clear_all_shape"),
-                      "None",
-                      class = "btn-outline-secondary btn-xs",
-                      style = "font-size: 0.75rem; padding: 0.15rem 0.4rem;"
-                    )
-                  )
-                ),
-                div(
-                  class = "card-body",
-                  checkboxGroupInput(
-                    ns("metrics_shape"),
-                    label = NULL,
-                    choices = c(
-                      "Full Width Half Max (FWHM)" = "FWHM",
-                      "Width at 50% Max" = "Width_50"
-                    ),
-                    selected = c("FWHM")
-                  )
-                )
-              ),
-              
-              # Height Metrics
-              # Min, max, and median heat capacity values
-              div(
-                class = "card mb-3",
-                div(
-                  class = "card-header d-flex justify-content-between align-items-center",
-                  tags$strong("Height Metrics"),
-                  div(
-                    class = "btn-group btn-group-sm",
-                    actionButton(
-                      ns("select_all_height"),
-                      "All",
-                      class = "btn-outline-success btn-xs",
-                      style = "font-size: 0.75rem; padding: 0.15rem 0.4rem;"
-                    ),
-                    actionButton(
-                      ns("clear_all_height"),
-                      "None",
-                      class = "btn-outline-secondary btn-xs",
-                      style = "font-size: 0.75rem; padding: 0.15rem 0.4rem;"
-                    )
-                  )
-                ),
-                div(
-                  class = "card-body",
-                  checkboxGroupInput(
-                    ns("metrics_height"),
-                    label = NULL,
-                    choices = c(
-                      "Maximum Heat Capacity" = "Max",
-                      "Minimum Heat Capacity" = "Min",
-                      "Median Heat Capacity" = "Median"
-                    ),
-                    selected = c("Max")
-                  )
-                )
-              )
-            ),
-            
-            # ==================================================================
-            # Column 3: Temperature Metrics and Info
-            # ==================================================================
-            div(
-              class = "col-md-4",
-              
-              # Temperature Metrics
-              # Specific temperature measurements
-              div(
-                class = "card mb-3",
-                div(
-                  class = "card-header d-flex justify-content-between align-items-center",
-                  tags$strong("Temperature Metrics"),
-                  div(
-                    class = "btn-group btn-group-sm",
-                    actionButton(
-                      ns("select_all_temperature"),
-                      "All",
-                      class = "btn-outline-success btn-xs",
-                      style = "font-size: 0.75rem; padding: 0.15rem 0.4rem;"
-                    ),
-                    actionButton(
-                      ns("clear_all_temperature"),
-                      "None",
-                      class = "btn-outline-secondary btn-xs",
-                      style = "font-size: 0.75rem; padding: 0.15rem 0.4rem;"
-                    )
-                  )
-                ),
-                div(
-                  class = "card-body",
-                  checkboxGroupInput(
-                    ns("metrics_temperature"),
-                    label = NULL,
-                    choices = c(
-                      "Temperature at Maximum" = "TMax",
-                      "Temperature at Minimum" = "TMin",
-                      "First Moment Temperature" = "TFM"
-                    ),
-                    selected = c("TMax")
-                  )
-                )
-              ),
-              
-              # Helpful info box
-              div(
-                class = "alert alert-info",
+                class = "alert alert-sm alert-info py-2 px-3 mb-3",
+                style = "font-size: 0.85rem;",
                 icon("info-circle"), " ",
-                tags$strong("Tip:"), " Click 'Generate Report' to compute metric values"
-              )
+                "Select metrics to calculate for ", strong("non-excluded"), " samples."
+              ),
+              
+              # Dynamic metric categories
+              uiOutput(ns("metric_selection_ui"))
             )
           )
-        )
-      ),
-      
-      # ========================================================================
-      # Report Preview Card
-      # ========================================================================
-      # Shows calculated metrics in an interactive table
-      div(
-        class = "card mb-3",
-        div(
-          class = "card-header bg-success text-white",
-          icon("table"), " Report Preview"
         ),
+        
+        # RIGHT COLUMN: Generation & Preview (60% width)
+        # ======================================================================
         div(
-          class = "card-body",
-          uiOutput(ns("report_preview_display"))
+          class = "col-md-7",
+          
+          # Generation Card
+          div(
+            class = "card mb-3",
+            div(
+              class = "card-header bg-success text-white",
+              icon("calculator"), " Generate Report"
+            ),
+            div(
+              class = "card-body",
+              
+              # Status message (regeneration needed?)
+              uiOutput(ns("regeneration_status")),
+              
+              # Generate button
+              actionButton(
+                ns("calculate_metrics"),
+                textOutput(ns("generate_button_text"), inline = TRUE),
+                icon = icon("play"),
+                class = "btn-success btn-lg w-100"
+              )
+            )
+          ),
+          
+          # Preview Card (conditional)
+          uiOutput(ns("report_preview_card"))
         )
-      ),
-      
-      # ========================================================================
-      # Export Options Card (Conditional)
-      # ========================================================================
-      # Only displayed after metrics have been calculated
-      # Provides both save-to-disk and direct download options
-      uiOutput(ns("export_card_ui"))
+      )
     )
   )
 }
 
+
 # ------------------------------------------------------------------------------
 # Server Function
 # ------------------------------------------------------------------------------
-#' Report Builder Server Logic
-#'
-#' Handles metric calculation, preview display, and export functionality
-#'
-#' @param id Module namespace ID
-#' @param app_data Reactive values containing processed data and app state
-#' @return NULL (module manages internal state only)
 mod_report_builder_server <- function(id, app_data) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
@@ -403,39 +172,85 @@ mod_report_builder_server <- function(id, app_data) {
     # ==========================================================================
     # Reactive Values
     # ==========================================================================
-    # Internal state management for this module
     
-    # Stores the data frame of calculated metrics (Sample_ID + metric columns)
-    # NULL until first calculation, then persists for export
+    # Calculated metrics data frame
     calculated_metrics <- reactiveVal(NULL)
     
-    # Flag to prevent multiple simultaneous calculations
-    # TRUE while calculation in progress, FALSE otherwise
+    # Hash of data when metrics were calculated
+    data_hash_at_calculation <- reactiveVal(NULL)
+    
+    # Calculation in progress flag
     calculating <- reactiveVal(FALSE)
+    
+    # ==========================================================================
+    # Helper Functions
+    # ==========================================================================
+    
+    # Calculate hash of current processed data state
+    calculate_data_hash <- function() {
+      req(app_data$processed_data)
+      
+      hash_data <- lapply(app_data$processed_data$samples, function(s) {
+        list(
+          lower = s$lower_endpoint,
+          upper = s$upper_endpoint,
+          excluded = s$excluded,
+          manual = s$manual_adjustment
+        )
+      })
+      
+      digest::digest(hash_data, algo = "md5")
+    }
+    
+    # Check if data has changed since last calculation
+    data_has_changed <- reactive({
+      if (is.null(calculated_metrics())) return(FALSE)
+      if (is.null(data_hash_at_calculation())) return(TRUE)
+      
+      current_hash <- calculate_data_hash()
+      !identical(current_hash, data_hash_at_calculation())
+    })
+    
+    # Get list of selected metric keys from checkboxes
+    get_selected_metrics <- function() {
+      all_keys <- c(
+        # Peak Heights
+        "peak_1", "peak_2", "peak_3", "peak_f",
+        # Peak Temperatures
+        "tpeak_1", "tpeak_2", "tpeak_3", "tpeak_f",
+        # Peak Ratios
+        "peak1_peak2_ratio", "peak1_peak3_ratio", "peak2_peak3_ratio",
+        # Valleys
+        "v12", "tv12",
+        # Valley Ratios
+        "v12_peak1_ratio", "v12_peak2_ratio", "v12_peak3_ratio",
+        # Global Metrics
+        "max_dcp", "tmax", "tfm", "width", "area",
+        # Additional
+        "min_dcp", "tmin", "median_dcp"
+      )
+      
+      Filter(function(key) {
+        isTRUE(input[[paste0("metric_", key)]])
+      }, all_keys)
+    }
     
     # ==========================================================================
     # Dataset Reload Observer
     # ==========================================================================
-    # Triggered when user loads a different dataset
-    # Clears previous calculations to prevent confusion
     
     observeEvent(app_data$dataset_load_trigger, {
       req(app_data$dataset_load_trigger > 0)
       
-      cat(sprintf("\n[REPORT_BUILDER] Dataset reload triggered (trigger=%d)\n", 
-                  app_data$dataset_load_trigger))
-      cat(sprintf("[REPORT_BUILDER] Loading dataset: %s\n", 
-                  app_data$current_dataset_name))
+      cat(sprintf("\n[REPORT_BUILDER] Dataset reload triggered\n"))
       
-      # Clear any previous calculations
       calculated_metrics(NULL)
+      data_hash_at_calculation(NULL)
       
-      # Log status
       if (!is.null(app_data$processed_data)) {
-        n_samples <- length(app_data$processed_data$samples)
-        cat(sprintf("[REPORT_BUILDER] Dataset loaded: %d samples available\n", n_samples))
-      } else {
-        cat("[REPORT_BUILDER] WARNING: No processed data available\n")
+        n_total <- length(app_data$processed_data$samples)
+        n_excluded <- sum(sapply(app_data$processed_data$samples, function(s) isTRUE(s$excluded)))
+        cat(sprintf("[REPORT_BUILDER] Dataset loaded: %d total, %d excluded\n", n_total, n_excluded))
       }
       
     }, ignoreInit = TRUE, priority = 100)
@@ -443,49 +258,50 @@ mod_report_builder_server <- function(id, app_data) {
     # ==========================================================================
     # Dataset Information Display
     # ==========================================================================
-    # Shows name, sample count, and status of loaded dataset
     
     output$dataset_info_display <- renderUI({
       
-      # Check if data is loaded
       if (is.null(app_data$processed_data)) {
         return(
-          div(
-            class = "alert alert-warning",
-            icon("exclamation-triangle"), " ",
-            "No processed data available. Please process data in the Data Overview tab."
+          p(
+            class = "text-muted mb-0",
+            icon("exclamation-triangle"), " No data loaded"
           )
         )
       }
       
-      # Extract information from loaded data
-      data <- app_data$processed_data
-      n_samples <- length(data$samples)
+      dataset_name <- app_data$current_dataset_name %||% "Unknown"
+      samples <- app_data$processed_data$samples
+      n_total <- length(samples)
+      n_excluded <- sum(sapply(samples, function(s) isTRUE(s$excluded)))
+      n_included <- n_total - n_excluded
       
-      dataset_name <- if (!is.null(app_data$current_dataset_name)) {
-        app_data$current_dataset_name
-      } else {
-        "Unknown Dataset"
-      }
-      
-      # Display dataset information
       tagList(
         div(
-          class = "row",
+          class = "row small",
           div(
-            class = "col-md-4",
-            tags$strong("Dataset:"), " ", dataset_name
+            class = "col-6",
+            strong("Dataset:"), " ", dataset_name
           ),
           div(
-            class = "col-md-4",
-            tags$strong("Samples:"), " ", n_samples
+            class = "col-6 text-end",
+            strong("Total:"), " ",
+            tags$span(class = "badge bg-secondary", n_total)
+          )
+        ),
+        div(
+          class = "row small mt-1",
+          div(
+            class = "col-6",
+            strong("Included:"), " ",
+            tags$span(class = "badge bg-success", n_included)
           ),
           div(
-            class = "col-md-4",
-            tags$strong("Status:"), " ",
-            span(
-              class = "badge bg-success",
-              "Ready for Analysis"
+            class = "col-6 text-end",
+            strong("Excluded:"), " ",
+            tags$span(
+              class = sprintf("badge bg-%s", if(n_excluded > 0) "warning" else "secondary"),
+              n_excluded
             )
           )
         )
@@ -493,487 +309,646 @@ mod_report_builder_server <- function(id, app_data) {
     })
     
     # ==========================================================================
-    # Metric Selection Helper
+    # Regeneration Status Message
     # ==========================================================================
-    # Aggregates all selected metrics from different categories into one vector
     
-    selected_metrics <- reactive({
-      metrics <- c(
-        input$metrics_peak,
-        input$metrics_transition,
-        input$metrics_area,
-        input$metrics_shape,
-        input$metrics_height,
-        input$metrics_temperature
-      )
-      # Remove duplicates (shouldn't occur, but defensive programming)
-      unique(metrics)
-    })
-    
-    # ==========================================================================
-    # Dynamic Calculate Button
-    # ==========================================================================
-    # Changes text and appearance based on whether metrics have been calculated
-    # - Before: "Generate Report" (blue, calculator icon)
-    # - After: "Regenerate Report" (yellow, rotate icon)
-    
-    output$calculate_button_ui <- renderUI({
+    output$regeneration_status <- renderUI({
       
-      has_calculated <- !is.null(calculated_metrics())
-      
-      if (has_calculated) {
-        # After calculation - allow regeneration with different metrics
-        actionButton(
-          ns("calculate_preview"),
-          "Regenerate Report",
-          icon = icon("rotate"),
-          class = "btn-warning btn-sm"
-        )
-      } else {
-        # Before calculation - initial generation
-        actionButton(
-          ns("calculate_preview"),
-          "Generate Report",
-          icon = icon("calculator"),
-          class = "btn-primary btn-sm"
-        )
-      }
-    })
-    
-    # ==========================================================================
-    # Global Metric Selection Buttons
-    # ==========================================================================
-    # Select All, Clear All, Reset to Defaults buttons
-    
-    # Select All - checks all metrics across all categories
-    observeEvent(input$select_all_metrics, {
-      updateCheckboxGroupInput(session, "metrics_peak", 
-                               selected = c("Tm", "Tpeak_1", "Tpeak_2", "Tpeak_3", "Tpeak_f"))
-      updateCheckboxGroupInput(session, "metrics_transition",
-                               selected = c("Tm1", "Tm2", "Tm3", "TV12"))
-      updateCheckboxGroupInput(session, "metrics_area",
-                               selected = c("AUC", "Area"))
-      updateCheckboxGroupInput(session, "metrics_shape",
-                               selected = c("FWHM", "Width_50"))
-      updateCheckboxGroupInput(session, "metrics_height",
-                               selected = c("Max", "Min", "Median"))
-      updateCheckboxGroupInput(session, "metrics_temperature",
-                               selected = c("TMax", "TMin", "TFM"))
-      
-      showNotification("All metrics selected", type = "message", duration = 2)
-    })
-    
-    # Clear All - unchecks all metrics
-    observeEvent(input$clear_all_metrics, {
-      updateCheckboxGroupInput(session, "metrics_peak", selected = character(0))
-      updateCheckboxGroupInput(session, "metrics_transition", selected = character(0))
-      updateCheckboxGroupInput(session, "metrics_area", selected = character(0))
-      updateCheckboxGroupInput(session, "metrics_shape", selected = character(0))
-      updateCheckboxGroupInput(session, "metrics_height", selected = character(0))
-      updateCheckboxGroupInput(session, "metrics_temperature", selected = character(0))
-      
-      # Clear calculated metrics since selection changed
-      calculated_metrics(NULL)
-      
-      showNotification("All metrics cleared", type = "message", duration = 2)
-    })
-    
-    # Reset to Defaults - selects commonly used metrics
-    observeEvent(input$reset_to_defaults, {
-      updateCheckboxGroupInput(session, "metrics_peak", 
-                               selected = c("Tm", "Tpeak_1", "Tpeak_2"))
-      updateCheckboxGroupInput(session, "metrics_transition",
-                               selected = c("Tm1", "Tm2"))
-      updateCheckboxGroupInput(session, "metrics_area",
-                               selected = c("AUC"))
-      updateCheckboxGroupInput(session, "metrics_shape",
-                               selected = c("FWHM"))
-      updateCheckboxGroupInput(session, "metrics_height",
-                               selected = c("Max"))
-      updateCheckboxGroupInput(session, "metrics_temperature",
-                               selected = c("TMax"))
-      
-      showNotification("Reset to default metrics", type = "message", duration = 2)
-    })
-    
-    # ==========================================================================
-    # Category-Specific Select/Clear Buttons
-    # ==========================================================================
-    # Each metric category has its own All/None buttons in the card header
-    
-    # Peak Metrics
-    observeEvent(input$select_all_peak, {
-      updateCheckboxGroupInput(session, "metrics_peak", 
-                               selected = c("Tm", "Tpeak_1", "Tpeak_2", "Tpeak_3", "Tpeak_f"))
-    })
-    observeEvent(input$clear_all_peak, {
-      updateCheckboxGroupInput(session, "metrics_peak", selected = character(0))
-    })
-    
-    # Transition Metrics
-    observeEvent(input$select_all_transition, {
-      updateCheckboxGroupInput(session, "metrics_transition",
-                               selected = c("Tm1", "Tm2", "Tm3", "TV12"))
-    })
-    observeEvent(input$clear_all_transition, {
-      updateCheckboxGroupInput(session, "metrics_transition", selected = character(0))
-    })
-    
-    # Area Metrics
-    observeEvent(input$select_all_area, {
-      updateCheckboxGroupInput(session, "metrics_area",
-                               selected = c("AUC", "Area"))
-    })
-    observeEvent(input$clear_all_area, {
-      updateCheckboxGroupInput(session, "metrics_area", selected = character(0))
-    })
-    
-    # Shape Metrics
-    observeEvent(input$select_all_shape, {
-      updateCheckboxGroupInput(session, "metrics_shape",
-                               selected = c("FWHM", "Width_50"))
-    })
-    observeEvent(input$clear_all_shape, {
-      updateCheckboxGroupInput(session, "metrics_shape", selected = character(0))
-    })
-    
-    # Height Metrics
-    observeEvent(input$select_all_height, {
-      updateCheckboxGroupInput(session, "metrics_height",
-                               selected = c("Max", "Min", "Median"))
-    })
-    observeEvent(input$clear_all_height, {
-      updateCheckboxGroupInput(session, "metrics_height", selected = character(0))
-    })
-    
-    # Temperature Metrics
-    observeEvent(input$select_all_temperature, {
-      updateCheckboxGroupInput(session, "metrics_temperature",
-                               selected = c("TMax", "TMin", "TFM"))
-    })
-    observeEvent(input$clear_all_temperature, {
-      updateCheckboxGroupInput(session, "metrics_temperature", selected = character(0))
-    })
-    
-    # ==========================================================================
-    # Calculate/Regenerate Report Button Handler
-    # ==========================================================================
-    # Calculates selected metrics using tlbparam package
-    # Stores results for preview and export
-    
-    observeEvent(input$calculate_preview, {
-      
-      cat("\n[REPORT_BUILDER] Calculate/Regenerate button clicked\n")
-      
-      # Validation: Check if data is loaded
-      if (is.null(app_data$processed_data)) {
-        showNotification(
-          "No processed data available. Please load data first.",
-          type = "error",
-          duration = 5
-        )
-        return()
-      }
-      
-      # Validation: Check if metrics are selected
-      metrics <- selected_metrics()
-      if (length(metrics) == 0) {
-        showNotification(
-          "Please select at least one metric to calculate.",
-          type = "warning",
-          duration = 3
-        )
-        return()
-      }
-      
-      # Prevent multiple simultaneous calculations
-      calculating(TRUE)
-      
-      # Notify user that calculation is starting
-      showNotification(
-        sprintf("Calculating %d metrics for %d samples...", 
-                length(metrics),
-                length(app_data$processed_data$samples)),
-        type = "message",
-        duration = 3,
-        id = "calc_notification"
-      )
-      
-      # Call calculation function from processing_utils.R
-      result <- tryCatch({
-        calculate_tlbparam_metrics(
-          processed_data = app_data$processed_data,
-          selected_metrics = metrics
-        )
-      }, error = function(e) {
-        # Handle calculation errors gracefully
-        showNotification(
-          sprintf("Error calculating metrics: %s", e$message),
-          type = "error",
-          duration = 10
-        )
-        return(NULL)
-      })
-      
-      # Reset calculating flag
-      calculating(FALSE)
-      
-      # Store results if successful
-      if (!is.null(result)) {
-        calculated_metrics(result)
-        showNotification(
-          sprintf("Successfully calculated %d metrics for %d samples", 
-                  ncol(result) - 1,
-                  nrow(result)),
-          type = "message",
-          duration = 5
-        )
-      }
-    })
-    
-    # ==========================================================================
-    # Report Preview Display
-    # ==========================================================================
-    # Shows different messages based on state:
-    # 1. No data loaded
-    # 2. Data loaded but no metrics selected
-    # 3. Metrics selected but not calculated
-    # 4. Metrics calculated - show preview table
-    
-    output$report_preview_display <- renderUI({
-      
-      # State 1: No data loaded
-      if (is.null(app_data$processed_data)) {
-        return(
-          div(
-            class = "alert alert-warning",
-            icon("exclamation-triangle"), " ",
-            "No processed data available. Please process data in the Data Overview tab."
-          )
-        )
-      }
-      
-      # State 2: No metrics selected
-      metrics <- selected_metrics()
-      if (length(metrics) == 0) {
-        return(
-          div(
-            class = "alert alert-info",
-            icon("info-circle"), " ",
-            "Select metrics above and click 'Generate Report' to see results."
-          )
-        )
-      }
-      
-      # State 3: Metrics selected but not calculated
-      results <- calculated_metrics()
-      if (is.null(results)) {
-        return(
-          div(
-            class = "alert alert-info",
-            icon("calculator"), " ",
-            tags$strong(length(metrics)), " metrics selected. ",
-            "Click 'Generate Report' to compute values."
-          )
-        )
-      }
-      
-      # State 4: Show preview table
-      tagList(
-        div(
-          class = "alert alert-success mb-3",
-          icon("check-circle"), " ",
-          sprintf("Showing %d metrics for %d samples", 
-                  ncol(results) - 1,
-                  nrow(results))
-        ),
-        DT::dataTableOutput(ns("metrics_preview_table"))
-      )
-    })
-    
-    # Render the metrics preview table
-    # Interactive table with sorting, search, and pagination
-    output$metrics_preview_table <- DT::renderDataTable({
-      req(calculated_metrics())
-      
-      results <- calculated_metrics()
-      
-      DT::datatable(
-        results,
-        options = list(
-          pageLength = 10,
-          scrollX = TRUE,
-          scrollY = "400px",
-          dom = 'ftp',  # Filter, table, pagination
-          columnDefs = list(
-            list(targets = 0, className = "dt-left")
-          )
-        ),
-        rownames = FALSE,
-        class = "compact hover"
-      ) %>%
-        DT::formatRound(
-          columns = 2:ncol(results),
-          digits = 3
-        )
-    })
-    
-    # ==========================================================================
-    # Conditional Export Card Display
-    # ==========================================================================
-    # Only shows export options after metrics have been calculated
-    # Provides both save-to-disk and direct download functionality
-    
-    output$export_card_ui <- renderUI({
-      
-      # Hide card if no metrics calculated yet
       if (is.null(calculated_metrics())) {
         return(NULL)
       }
       
-      # Show export card with download links and save buttons
+      if (data_has_changed()) {
+        div(
+          class = "alert alert-warning py-2 px-3 mb-3",
+          style = "font-size: 0.9rem;",
+          icon("exclamation-triangle"), " ",
+          strong("Data has changed!"), " ",
+          "Endpoints or exclusions have been modified. ",
+          "Please regenerate the report to reflect current data."
+        )
+      } else {
+        div(
+          class = "alert alert-success py-2 px-3 mb-3",
+          style = "font-size: 0.9rem;",
+          icon("check-circle"), " ",
+          "Report is up-to-date with current data."
+        )
+      }
+    })
+    
+    # ==========================================================================
+    # Dynamic Button Text
+    # ==========================================================================
+    
+    output$generate_button_text <- renderText({
+      if (is.null(calculated_metrics())) {
+        "Generate Report"
+      } else {
+        "Regenerate Report"
+      }
+    })
+    
+    # ==========================================================================
+    # Metric Selection UI with Complete tlbparam Metrics
+    # ==========================================================================
+    
+    output$metric_selection_ui <- renderUI({
+      
+      # Complete metric definitions matching tlbparam output
+      metric_categories <- list(
+        
+        "Peak Heights" = list(
+          list(
+            key = "peak_1",
+            label = "Peak 1",
+            tooltip = "Height of peak in region 60-66°C",
+            default = TRUE
+          ),
+          list(
+            key = "peak_2",
+            label = "Peak 2",
+            tooltip = "Height of peak in region 67-73°C",
+            default = TRUE
+          ),
+          list(
+            key = "peak_3",
+            label = "Peak 3",
+            tooltip = "Height of peak in region 73-81°C",
+            default = TRUE
+          ),
+          list(
+            key = "peak_f",
+            label = "Peak F (Fibrinogen)",
+            tooltip = "Height of peak in Fibrinogen region (47-60°C)",
+            default = FALSE
+          )
+        ),
+        
+        "Peak Temperatures" = list(
+          list(
+            key = "tpeak_1",
+            label = "T Peak 1",
+            tooltip = "Temperature of Peak 1 (°C)",
+            default = TRUE
+          ),
+          list(
+            key = "tpeak_2",
+            label = "T Peak 2",
+            tooltip = "Temperature of Peak 2 (°C)",
+            default = TRUE
+          ),
+          list(
+            key = "tpeak_3",
+            label = "T Peak 3",
+            tooltip = "Temperature of Peak 3 (°C)",
+            default = TRUE
+          ),
+          list(
+            key = "tpeak_f",
+            label = "T Peak F (Fibrinogen)",
+            tooltip = "Temperature of Fibrinogen peak (°C)",
+            default = FALSE
+          )
+        ),
+        
+        "Peak Ratios" = list(
+          list(
+            key = "peak1_peak2_ratio",
+            label = "Peak 1 / Peak 2",
+            tooltip = "Ratio of Peak 1 to Peak 2",
+            default = FALSE
+          ),
+          list(
+            key = "peak1_peak3_ratio",
+            label = "Peak 1 / Peak 3",
+            tooltip = "Ratio of Peak 1 to Peak 3",
+            default = FALSE
+          ),
+          list(
+            key = "peak2_peak3_ratio",
+            label = "Peak 2 / Peak 3",
+            tooltip = "Ratio of Peak 2 to Peak 3",
+            default = FALSE
+          )
+        ),
+        
+        "Valley Metrics" = list(
+          list(
+            key = "v12",
+            label = "V1.2",
+            tooltip = "Valley (minimum) between Peak 1 and Peak 2",
+            default = FALSE
+          ),
+          list(
+            key = "tv12",
+            label = "TV1.2",
+            tooltip = "Temperature of valley between Peak 1 and Peak 2 (°C)",
+            default = FALSE
+          ),
+          list(
+            key = "v12_peak1_ratio",
+            label = "V1.2 / Peak 1",
+            tooltip = "Ratio of V1.2 to Peak 1 amplitude",
+            default = FALSE
+          ),
+          list(
+            key = "v12_peak2_ratio",
+            label = "V1.2 / Peak 2",
+            tooltip = "Ratio of V1.2 to Peak 2 amplitude",
+            default = FALSE
+          ),
+          list(
+            key = "v12_peak3_ratio",
+            label = "V1.2 / Peak 3",
+            tooltip = "Ratio of V1.2 to Peak 3 amplitude",
+            default = FALSE
+          )
+        ),
+        
+        "Global Metrics (Primary)" = list(
+          list(
+            key = "max_dcp",
+            label = "Max",
+            tooltip = "Maximum observed excess heat capacity",
+            default = TRUE
+          ),
+          list(
+            key = "tmax",
+            label = "TMax",
+            tooltip = "Temperature at maximum height (°C)",
+            default = TRUE
+          ),
+          list(
+            key = "tfm",
+            label = "TFM",
+            tooltip = "Temperature of first moment (°C)",
+            default = FALSE
+          ),
+          list(
+            key = "width",
+            label = "Width",
+            tooltip = "Full width at half maximum",
+            default = TRUE
+          ),
+          list(
+            key = "area",
+            label = "Area",
+            tooltip = "Total area under thermogram signature",
+            default = TRUE
+          )
+        ),
+        
+        "Additional Metrics" = list(
+          list(
+            key = "min_dcp",
+            label = "Min",
+            tooltip = "Minimum observed excess heat capacity",
+            default = FALSE
+          ),
+          list(
+            key = "tmin",
+            label = "TMin",
+            tooltip = "Temperature at minimum (°C)",
+            default = FALSE
+          ),
+          list(
+            key = "median_dcp",
+            label = "Median",
+            tooltip = "Median observed excess heat capacity",
+            default = FALSE
+          )
+        )
+      )
+      
+      # Create compact cards for each category
+      category_uis <- lapply(names(metric_categories), function(category_name) {
+        
+        metrics <- metric_categories[[category_name]]
+        category_id <- gsub("[^A-Za-z0-9]", "_", tolower(category_name))
+        
+        div(
+          class = "card mb-2",
+          div(
+            class = "card-header py-1 px-2 bg-light d-flex justify-content-between align-items-center",
+            style = "font-size: 0.9rem;",
+            strong(category_name),
+            div(
+              class = "btn-group btn-group-sm",
+              actionButton(
+                ns(paste0("select_all_", category_id)),
+                "All",
+                class = "btn-outline-success btn-sm py-0 px-2",
+                style = "font-size: 0.75rem;"
+              ),
+              actionButton(
+                ns(paste0("clear_all_", category_id)),
+                "None",
+                class = "btn-outline-secondary btn-sm py-0 px-2",
+                style = "font-size: 0.75rem;"
+              )
+            )
+          ),
+          div(
+            class = "card-body py-2 px-3",
+            
+            lapply(metrics, function(m) {
+              div(
+                class = "form-check",
+                style = "font-size: 0.85rem;",
+                tags$input(
+                  type = "checkbox",
+                  class = "form-check-input",
+                  id = ns(paste0("metric_", m$key)),
+                  value = m$key,
+                  checked = if(m$default) "checked" else NULL
+                ),
+                tags$label(
+                  class = "form-check-label",
+                  `for` = ns(paste0("metric_", m$key)),
+                  `data-bs-toggle` = "tooltip",
+                  `data-bs-placement` = "right",
+                  title = m$tooltip,
+                  m$label
+                )
+              )
+            })
+          )
+        )
+      })
+      
+      tagList(
+        category_uis,
+        tags$script(HTML("
+          $(function () {
+            $('[data-bs-toggle=\"tooltip\"]').tooltip();
+          });
+        "))
+      )
+    })
+    
+    # ==========================================================================
+    # Category Control Button Observers
+    # ==========================================================================
+    
+    # Peak Heights
+    observeEvent(input$select_all_peak_heights, {
+      lapply(c("peak_1", "peak_2", "peak_3", "peak_f"), function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', true);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    observeEvent(input$clear_all_peak_heights, {
+      lapply(c("peak_1", "peak_2", "peak_3", "peak_f"), function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', false);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    # Peak Temperatures
+    observeEvent(input$select_all_peak_temperatures, {
+      lapply(c("tpeak_1", "tpeak_2", "tpeak_3", "tpeak_f"), function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', true);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    observeEvent(input$clear_all_peak_temperatures, {
+      lapply(c("tpeak_1", "tpeak_2", "tpeak_3", "tpeak_f"), function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', false);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    # Peak Ratios
+    observeEvent(input$select_all_peak_ratios, {
+      lapply(c("peak1_peak2_ratio", "peak1_peak3_ratio", "peak2_peak3_ratio"), function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', true);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    observeEvent(input$clear_all_peak_ratios, {
+      lapply(c("peak1_peak2_ratio", "peak1_peak3_ratio", "peak2_peak3_ratio"), function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', false);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    # Valley Metrics
+    observeEvent(input$select_all_valley_metrics, {
+      lapply(c("v12", "tv12", "v12_peak1_ratio", "v12_peak2_ratio", "v12_peak3_ratio"), function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', true);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    observeEvent(input$clear_all_valley_metrics, {
+      lapply(c("v12", "tv12", "v12_peak1_ratio", "v12_peak2_ratio", "v12_peak3_ratio"), function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', false);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    # Global Metrics (Primary)
+    observeEvent(input$select_all_global_metrics_primary, {
+      lapply(c("max_dcp", "tmax", "tfm", "width", "area"), function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', true);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    observeEvent(input$clear_all_global_metrics_primary, {
+      lapply(c("max_dcp", "tmax", "tfm", "width", "area"), function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', false);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    # Additional Metrics
+    observeEvent(input$select_all_additional_metrics, {
+      lapply(c("min_dcp", "tmin", "median_dcp"), function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', true);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    observeEvent(input$clear_all_additional_metrics, {
+      lapply(c("min_dcp", "tmin", "median_dcp"), function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', false);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    # ==========================================================================
+    # Global Control Buttons
+    # ==========================================================================
+    
+    observeEvent(input$select_all_metrics, {
+      all_keys <- c(
+        "peak_1", "peak_2", "peak_3", "peak_f",
+        "tpeak_1", "tpeak_2", "tpeak_3", "tpeak_f",
+        "peak1_peak2_ratio", "peak1_peak3_ratio", "peak2_peak3_ratio",
+        "v12", "tv12", "v12_peak1_ratio", "v12_peak2_ratio", "v12_peak3_ratio",
+        "max_dcp", "tmax", "tfm", "width", "area",
+        "min_dcp", "tmin", "median_dcp"
+      )
+      
+      lapply(all_keys, function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', true);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    observeEvent(input$clear_all_metrics, {
+      all_keys <- c(
+        "peak_1", "peak_2", "peak_3", "peak_f",
+        "tpeak_1", "tpeak_2", "tpeak_3", "tpeak_f",
+        "peak1_peak2_ratio", "peak1_peak3_ratio", "peak2_peak3_ratio",
+        "v12", "tv12", "v12_peak1_ratio", "v12_peak2_ratio", "v12_peak3_ratio",
+        "max_dcp", "tmax", "tfm", "width", "area",
+        "min_dcp", "tmin", "median_dcp"
+      )
+      
+      lapply(all_keys, function(key) {
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', false);", ns(paste0("metric_", key))))
+      })
+    })
+    
+    observeEvent(input$reset_to_defaults, {
+      # Defaults: Peak 1-3, TPeak 1-3, Max, TMax, Width, Area
+      default_keys <- c("peak_1", "peak_2", "peak_3", "tpeak_1", "tpeak_2", "tpeak_3", 
+                        "max_dcp", "tmax", "width", "area")
+      all_keys <- c(
+        "peak_1", "peak_2", "peak_3", "peak_f",
+        "tpeak_1", "tpeak_2", "tpeak_3", "tpeak_f",
+        "peak1_peak2_ratio", "peak1_peak3_ratio", "peak2_peak3_ratio",
+        "v12", "tv12", "v12_peak1_ratio", "v12_peak2_ratio", "v12_peak3_ratio",
+        "max_dcp", "tmax", "tfm", "width", "area",
+        "min_dcp", "tmin", "median_dcp"
+      )
+      
+      lapply(all_keys, function(key) {
+        checked <- if(key %in% default_keys) "true" else "false"
+        shinyjs::runjs(sprintf("$('#%s').prop('checked', %s);", ns(paste0("metric_", key)), checked))
+      })
+    })
+    
+    # ==========================================================================
+    # Calculate Metrics Handler - Using tlbparam
+    # ==========================================================================
+    
+    observeEvent(input$calculate_metrics, {
+      
+      cat("\n[REPORT_BUILDER] Calculate metrics triggered\n")
+      
+      if (calculating()) return()
+      if (is.null(app_data$processed_data)) {
+        showNotification("No data loaded", type = "error", duration = 5)
+        return()
+      }
+      
+      # Get selected metrics
+      selected_metrics <- get_selected_metrics()
+      
+      if (length(selected_metrics) == 0) {
+        showNotification("Please select at least one metric", type = "warning", duration = 5)
+        return()
+      }
+      
+      cat(sprintf("[REPORT_BUILDER] Selected %d metrics: %s\n", 
+                  length(selected_metrics), 
+                  paste(selected_metrics, collapse = ", ")))
+      
+      calculating(TRUE)
+      showNotification(id = "calc_progress", "Calculating metrics using tlbparam...", duration = NULL, type = "message")
+      
+      # Filter excluded samples BEFORE calling tlbparam
+      all_samples <- app_data$processed_data$samples
+      included_samples <- Filter(function(s) !isTRUE(s$excluded), all_samples)
+      
+      n_total <- length(all_samples)
+      n_included <- length(included_samples)
+      n_excluded <- n_total - n_included
+      
+      cat(sprintf("[REPORT_BUILDER] Filtering: %d total, %d included, %d excluded\n",
+                  n_total, n_included, n_excluded))
+      
+      if (n_included == 0) {
+        calculating(FALSE)
+        removeNotification("calc_progress")
+        showNotification("All samples excluded", type = "error", duration = 8)
+        return()
+      }
+      
+      # Create temporary processed_data with only included samples
+      filtered_data <- list(
+        samples = included_samples,
+        summary = app_data$processed_data$summary
+      )
+      
+      # Call tlbparam calculation function from processing_utils.R
+      tryCatch({
+        
+        cat("[REPORT_BUILDER] Calling calculate_tlbparam_metrics()...\n")
+        
+        result <- calculate_tlbparam_metrics(
+          processed_data = filtered_data,
+          selected_metrics = selected_metrics
+        )
+        
+        if (is.null(result)) {
+          stop("tlbparam calculation returned NULL")
+        }
+        
+        # Store results and hash
+        calculated_metrics(result)
+        data_hash_at_calculation(calculate_data_hash())
+        
+        cat(sprintf("[REPORT_BUILDER] ✅ Success: %d samples, %d metrics\n",
+                    nrow(result), ncol(result) - 1))
+        
+        removeNotification("calc_progress")
+        showNotification(
+          sprintf("Metrics calculated! %d samples, %d metrics", n_included, ncol(result) - 1),
+          type = "message",
+          duration = 5
+        )
+        
+      }, error = function(e) {
+        cat(sprintf("[REPORT_BUILDER] ❌ Error: %s\n", e$message))
+        removeNotification("calc_progress")
+        showNotification(
+          HTML(sprintf(
+            "<strong>Calculation Error</strong><br/>%s<br/><br/>Please check console for details.",
+            e$message
+          )),
+          type = "error",
+          duration = 10
+        )
+        calculated_metrics(NULL)
+      }, finally = {
+        calculating(FALSE)
+      })
+    })
+    
+    # ==========================================================================
+    # Preview Card
+    # ==========================================================================
+    
+    output$report_preview_card <- renderUI({
+      
+      metrics <- calculated_metrics()
+      if (is.null(metrics)) return(NULL)
+      
       div(
         class = "card mb-3",
         div(
-          class = "card-header bg-warning d-flex justify-content-between align-items-center",
-          div(
-            icon("file-export"), " Export Report"
-          ),
-          div(
-            class = "btn-group",
-            # Direct download buttons (browser download)
-            downloadLink(
-              ns("download_csv"),
-              label = tagList(icon("download"), " Download CSV"),
-              class = "btn btn-primary btn-sm"
-            ),
-            downloadLink(
-              ns("download_excel"),
-              label = tagList(icon("download"), " Download Excel"),
-              class = "btn btn-success btn-sm"
-            )
-          )
+          class = "card-header bg-warning text-dark",
+          icon("table"), " Report Preview"
         ),
         div(
           class = "card-body",
           
-          # Report naming section
+          p(
+            class = "text-muted small",
+            icon("info-circle"),
+            sprintf(" Showing %d samples, %d metrics", nrow(metrics), ncol(metrics) - 1)
+          ),
+          
+          DT::dataTableOutput(ns("metrics_preview_table")),
+          
+          hr(),
+          
+          # Export Section
+          h5(class = "mb-3", icon("download"), " Export Options"),
+          
+          textInput(
+            ns("report_name"),
+            "Report Name (optional)",
+            placeholder = "Auto-generated if left blank",
+            width = "100%"
+          ),
+          
           div(
-            class = "row mb-3",
+            class = "row",
+            
+            # Direct Download Column
             div(
-              class = "col-md-8",
-              textInput(
-                ns("report_name"),
-                "Report Name:",
-                value = "",
-                placeholder = "e.g., Blood_Plasma_Analysis_1"
+              class = "col-md-6",
+              h6(class = "text-muted", icon("arrow-down"), " Direct Download"),
+              p(class = "small text-muted", "Download to your custom location"),
+              downloadButton(
+                ns("download_csv"),
+                "Download CSV",
+                class = "btn-primary w-100 mb-2",
+                icon = icon("file-csv")
               ),
-              div(
-                class = "form-text",
-                "Leave blank for automatic naming with timestamp"
+              downloadButton(
+                ns("download_excel"),
+                "Download Excel",
+                class = "btn-success w-100",
+                icon = icon("file-excel")
               )
-            )
-          ),
-          
-          # Save to disk buttons (saves to reports/ directory)
-          div(
-            class = "row mb-3",
+            ),
+            
+            # Save to Disk Column
             div(
-              class = "col-md-12",
-              tags$strong("Save to reports/ directory:"),
-              div(
-                class = "btn-group mt-2",
-                actionButton(
-                  ns("export_csv"),
-                  "Export as CSV",
-                  icon = icon("file-csv"),
-                  class = "btn-outline-primary btn-sm"
-                ),
-                actionButton(
-                  ns("export_excel"),
-                  "Export as Excel",
-                  icon = icon("file-excel"),
-                  class = "btn-outline-success btn-sm"
-                )
+              class = "col-md-6",
+              h6(class = "text-muted", icon("save"), " Save to Reports Folder"),
+              p(class = "small text-muted", "Save to reports/ for tracking in Data Overview"),
+              actionButton(
+                ns("export_csv"),
+                "Save CSV",
+                class = "btn-outline-primary w-100 mb-2",
+                icon = icon("floppy-disk")
+              ),
+              actionButton(
+                ns("export_excel"),
+                "Save Excel",
+                class = "btn-outline-success w-100",
+                icon = icon("floppy-disk")
               )
             )
-          ),
-          
-          # Export status messages
-          div(
-            class = "mt-3",
-            uiOutput(ns("export_status_display"))
           )
         )
       )
     })
     
-    # ==========================================================================
-    # Direct Download Handlers
-    # ==========================================================================
-    # Triggers browser download dialog without saving to reports/ directory
+    output$metrics_preview_table <- DT::renderDataTable({
+      req(calculated_metrics())
+      
+      DT::datatable(
+        calculated_metrics(),
+        options = list(
+          pageLength = 15,
+          scrollX = TRUE,
+          dom = 'frtip',
+          order = list(list(0, 'asc'))
+        ),
+        rownames = FALSE,
+        class = "compact stripe hover"
+      )
+    })
     
-    # CSV Download Handler
+    # ==========================================================================
+    # Download Handlers (Direct Browser Download)
+    # ==========================================================================
+    
     output$download_csv <- downloadHandler(
       filename = function() {
-        metrics <- calculated_metrics()
-        req(metrics)
-        
-        report_name <- trimws(input$report_name)
-        if (nchar(report_name) == 0) {
-          timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-          sprintf("Report_%s.csv", timestamp)
-        } else {
-          clean_name <- gsub("[^A-Za-z0-9_-]", "_", report_name)
-          sprintf("%s.csv", clean_name)
-        }
+        dataset_name <- tools::file_path_sans_ext(app_data$current_dataset_name %||% "Report")
+        sprintf("%s_%s.csv", dataset_name, format(Sys.time(), "%Y%m%d_%H%M%S"))
       },
       content = function(file) {
-        metrics <- calculated_metrics()
-        req(metrics)
-        
-        readr::write_csv(metrics, file)
-        
+        req(calculated_metrics())
+        readr::write_csv(calculated_metrics(), file)
         cat(sprintf("[REPORT_BUILDER] Direct CSV download: %s\n", basename(file)))
       }
     )
     
-    # Excel Download Handler
     output$download_excel <- downloadHandler(
       filename = function() {
-        metrics <- calculated_metrics()
-        req(metrics)
-        
-        report_name <- trimws(input$report_name)
-        if (nchar(report_name) == 0) {
-          timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-          sprintf("Report_%s.xlsx", timestamp)
-        } else {
-          clean_name <- gsub("[^A-Za-z0-9_-]", "_", report_name)
-          sprintf("%s.xlsx", clean_name)
-        }
+        dataset_name <- tools::file_path_sans_ext(app_data$current_dataset_name %||% "Report")
+        sprintf("%s_%s.xlsx", dataset_name, format(Sys.time(), "%Y%m%d_%H%M%S"))
       },
       content = function(file) {
+        req(calculated_metrics())
+        
         metrics <- calculated_metrics()
-        req(metrics)
-        
-        dataset_name <- if (!is.null(app_data$current_dataset_name)) {
-          app_data$current_dataset_name
-        } else {
-          "Unknown_Dataset"
-        }
-        
-        # Create metadata sheet
+        dataset_name <- app_data$current_dataset_name %||% "Unknown"
         metric_names <- setdiff(names(metrics), "Sample_ID")
         
         metadata_sheet <- data.frame(
-          Property = c(
-            "Report Generated",
-            "Source Dataset",
-            "Number of Samples",
-            "Number of Metrics",
-            "Metrics Included"
-          ),
+          Property = c("Report Generated", "Source Dataset", "Samples", "Metrics", "Metrics Included"),
           Value = c(
             format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
             dataset_name,
@@ -984,12 +959,8 @@ mod_report_builder_server <- function(id, app_data) {
           stringsAsFactors = FALSE
         )
         
-        # Write multi-sheet Excel file
         writexl::write_xlsx(
-          list(
-            Metrics = metrics,
-            Metadata = metadata_sheet
-          ),
+          list(Metrics = metrics, Metadata = metadata_sheet),
           path = file
         )
         
@@ -998,215 +969,122 @@ mod_report_builder_server <- function(id, app_data) {
     )
     
     # ==========================================================================
-    # Save to Disk Handlers (Export Buttons)
+    # Export Handlers (Save to reports/ folder)
     # ==========================================================================
-    # Saves files to reports/ directory and tracks in app_data$generated_reports
     
-    # CSV Export Handler
     observeEvent(input$export_csv, {
       
-      cat("\n[REPORT_BUILDER] CSV export button clicked\n")
+      cat("\n[REPORT_BUILDER] CSV export (save to disk) triggered\n")
       
-      # Validation: Check if metrics calculated
       metrics <- calculated_metrics()
-      
-      if (is.null(metrics)) {
+      if (is.null(metrics) || nrow(metrics) == 0) {
         showNotification(
-          "Please calculate metrics first using the 'Generate Report' button.",
+          "Please calculate metrics first",
           type = "warning",
           duration = 5
         )
         return()
       }
       
-      if (nrow(metrics) == 0) {
-        showNotification(
-          "No metric data available to export.",
-          type = "warning",
-          duration = 5
-        )
-        return()
-      }
-      
-      # Get report name and dataset name
-      report_name <- trimws(input$report_name)
-      
-      dataset_name <- if (!is.null(app_data$current_dataset_name)) {
-        app_data$current_dataset_name
-      } else {
-        "Unknown_Dataset"
-      }
-      
-      cat(sprintf("[REPORT_BUILDER] Exporting %d samples, %d metrics\n",
-                  nrow(metrics), ncol(metrics) - 1))
-      cat(sprintf("[REPORT_BUILDER] Report name: '%s'\n", 
-                  ifelse(nchar(report_name) > 0, report_name, "(auto-generated)")))
-      
-      # Call export function from processing_utils.R
       result <- export_report_csv(
         metrics_data = metrics,
-        report_name = report_name,
-        dataset_name = dataset_name
+        report_name = trimws(input$report_name),
+        dataset_name = app_data$current_dataset_name %||% "Unknown"
       )
       
       if (result$success) {
         
-        # Generate unique report ID
         report_id <- paste0("report_", format(Sys.time(), "%Y%m%d_%H%M%S"))
         
-        # Store report metadata for history tracking
-        new_report <- list(
+        app_data$generated_reports[[report_id]] <- list(
           id = report_id,
           name = tools::file_path_sans_ext(result$filename),
           format = "csv",
           filepath = result$filepath,
-          dataset_name = dataset_name,
+          dataset_name = app_data$current_dataset_name %||% "Unknown",
           n_samples = nrow(metrics),
           n_metrics = ncol(metrics) - 1,
           generated_at = Sys.time()
         )
         
-        # Add to app_data for display in Data Overview
-        app_data$generated_reports[[report_id]] <- new_report
+        cat(sprintf("[REPORT_BUILDER] Report tracked: %s\n", report_id))
         
-        cat(sprintf("[REPORT_BUILDER] Report metadata stored (ID: %s)\n", report_id))
-        cat(sprintf("[REPORT_BUILDER] Total reports in history: %d\n", 
-                    length(app_data$generated_reports)))
-        
-        # Show success notification
         showNotification(
-          ui = tagList(
-            icon("check-circle"), " ",
-            tags$strong("CSV Report Generated!"), tags$br(),
-            sprintf("File: %s", result$filename), tags$br(),
-            sprintf("Location: reports/")
-          ),
+          HTML(sprintf(
+            "<strong>CSV Saved!</strong><br/>File: %s<br/>Location: reports/<br/>View in Data Overview",
+            result$filename
+          )),
           type = "message",
           duration = 8
         )
         
-        # Clear report name input for next export
         updateTextInput(session, "report_name", value = "")
         
       } else {
-        # Show error notification
         showNotification(
           sprintf("Export failed: %s", result$message),
           type = "error",
           duration = 10
         )
       }
-      
     })
     
-    # Excel Export Handler
     observeEvent(input$export_excel, {
       
-      cat("\n[REPORT_BUILDER] Excel export button clicked\n")
+      cat("\n[REPORT_BUILDER] Excel export (save to disk) triggered\n")
       
-      # Validation: Check if metrics calculated
       metrics <- calculated_metrics()
-      
-      if (is.null(metrics)) {
+      if (is.null(metrics) || nrow(metrics) == 0) {
         showNotification(
-          "Please calculate metrics first using the 'Generate Report' button.",
+          "Please calculate metrics first",
           type = "warning",
           duration = 5
         )
         return()
       }
       
-      if (nrow(metrics) == 0) {
-        showNotification(
-          "No metric data available to export.",
-          type = "warning",
-          duration = 5
-        )
-        return()
-      }
-      
-      # Get report name and dataset name
-      report_name <- trimws(input$report_name)
-      
-      dataset_name <- if (!is.null(app_data$current_dataset_name)) {
-        app_data$current_dataset_name
-      } else {
-        "Unknown_Dataset"
-      }
-      
-      cat(sprintf("[REPORT_BUILDER] Exporting %d samples, %d metrics to Excel\n",
-                  nrow(metrics), ncol(metrics) - 1))
-      cat(sprintf("[REPORT_BUILDER] Report name: '%s'\n", 
-                  ifelse(nchar(report_name) > 0, report_name, "(auto-generated)")))
-      
-      # Call export function from processing_utils.R
       result <- export_report_excel(
         metrics_data = metrics,
-        report_name = report_name,
-        dataset_name = dataset_name
+        report_name = trimws(input$report_name),
+        dataset_name = app_data$current_dataset_name %||% "Unknown"
       )
       
       if (result$success) {
         
-        # Generate unique report ID
         report_id <- paste0("report_", format(Sys.time(), "%Y%m%d_%H%M%S"))
         
-        # Store report metadata for history tracking
-        new_report <- list(
+        app_data$generated_reports[[report_id]] <- list(
           id = report_id,
           name = tools::file_path_sans_ext(result$filename),
           format = "xlsx",
           filepath = result$filepath,
-          dataset_name = dataset_name,
+          dataset_name = app_data$current_dataset_name %||% "Unknown",
           n_samples = nrow(metrics),
           n_metrics = ncol(metrics) - 1,
           generated_at = Sys.time()
         )
         
-        # Add to app_data for display in Data Overview
-        app_data$generated_reports[[report_id]] <- new_report
+        cat(sprintf("[REPORT_BUILDER] Report tracked: %s\n", report_id))
         
-        cat(sprintf("[REPORT_BUILDER] Report metadata stored (ID: %s)\n", report_id))
-        cat(sprintf("[REPORT_BUILDER] Total reports in history: %d\n", 
-                    length(app_data$generated_reports)))
-        
-        # Show success notification
         showNotification(
-          ui = tagList(
-            icon("check-circle"), " ",
-            tags$strong("Excel Report Generated!"), tags$br(),
-            sprintf("File: %s", result$filename), tags$br(),
-            sprintf("Location: reports/"), tags$br(),
-            tags$small("Contains 2 sheets: Metrics + Metadata")
-          ),
+          HTML(sprintf(
+            "<strong>Excel Saved!</strong><br/>File: %s<br/>Location: reports/<br/>View in Data Overview",
+            result$filename
+          )),
           type = "message",
-          duration = 10
+          duration = 8
         )
         
-        # Clear report name input for next export
         updateTextInput(session, "report_name", value = "")
         
       } else {
-        # Show error notification
         showNotification(
           sprintf("Export failed: %s", result$message),
           type = "error",
           duration = 10
         )
       }
-      
     })
-    
-    # Export status display (currently unused but available for future features)
-    output$export_status_display <- renderUI({
-      NULL
-    })
-    
-    # ==========================================================================
-    # Module Return
-    # ==========================================================================
-    # This module manages its own state and doesn't return values to parent
-    NULL
     
   })
 }

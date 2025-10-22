@@ -46,7 +46,13 @@ custom_css <- function() {
     background-color: #f8f9fa;
   }
   
-  /* Navbar styling */
+  /* Sticky Navbar - Pin to top without covering content */
+  .bslib-page-navbar {
+    position: sticky !important;
+    top: 0;
+    z-index: 1020;
+  }
+  
   .navbar {
     background-color: #ffffff !important;
     border-bottom: 1px solid #dee2e6;
@@ -82,212 +88,135 @@ custom_css <- function() {
   .btn {
     border-radius: 0.375rem;
     font-weight: 500;
-    padding: 0.5rem 1rem;
   }
   
-  .btn-primary {
-    background-color: #0d6efd;
-    border-color: #0d6efd;
-  }
-  
-  .btn-primary:hover {
-    background-color: #0b5ed7;
-    border-color: #0a58ca;
-  }
-  
-  /* DataTable styling */
-  .dataTables_wrapper {
-    padding: 0;
-  }
-  
-  table.dataTable tbody tr.selected {
-    background-color: #cfe2ff !important;
-  }
-  
-  table.dataTable tbody tr:hover {
-    background-color: #e3f2fd !important;
-  }
-  
-  /* Plot container */
-  .plotly {
-    border: 1px solid #dee2e6;
-    border-radius: 0.375rem;
-    background-color: white;
-  }
-  
-  .js-plotly-plot .plotly .main-svg {
-    border-radius: 0.375rem;
-  }
-  
-  /* Status badges */
-  .badge {
-    padding: 0.35em 0.65em;
-    font-size: 0.875em;
-    font-weight: 600;
-    border-radius: 0.375rem;
-  }
-  
-  /* Layout utilities */
-  .row {
-    display: flex;
-    flex-wrap: wrap;
-    margin-right: -0.75rem;
-    margin-left: -0.75rem;
-  }
-  
-  .col-6 {
-    flex: 0 0 auto;
-    width: 50%;
-    padding-right: 0.75rem;
-    padding-left: 0.75rem;
-  }
-  
-  .col-md-5 {
-    flex: 0 0 auto;
-    width: 41.66667%;
-  }
-  
-  .col-md-6 {
-    flex: 0 0 auto;
-    width: 50%;
-  }
-  
-  .col-md-7 {
-    flex: 0 0 auto;
-    width: 58.33333%;
-  }
-  
-  /* Spacing utilities */
-  .mt-3 { margin-top: 1rem !important; }
-  .mb-2 { margin-bottom: 0.5rem !important; }
-  .mb-3 { margin-bottom: 1rem !important; }
-  .ms-2 { margin-left: 0.5rem !important; }
-  .me-1 { margin-right: 0.25rem !important; }
-  .p-2 { padding: 0.5rem !important; }
-  .p-3 { padding: 1rem !important; }
-  .w-100 { width: 100% !important; }
-  .d-flex { display: flex !important; }
-  .gap-2 > * + * { margin-left: 0.5rem; }
-  .justify-content-between { justify-content: space-between !important; }
-  .align-items-center { align-items: center !important; }
-  .text-center { text-align: center; }
-  
-  /* Badge styling */
-  .badge {
-    display: inline-block;
-    padding: 0.35em 0.65em;
-    font-size: 0.875em;
-    font-weight: 600;
-    line-height: 1;
-    color: #fff;
-    text-align: center;
-    white-space: nowrap;
-    vertical-align: baseline;
-    border-radius: 0.375rem;
-  }
-  
-  .bg-warning {
-    background-color: #ffc107 !important;
-    color: #000 !important;
-  }
-  
-  .bg-success {
-    background-color: #198754 !important;
-    color: #fff !important;
-  }
-  
-  /* Button group styling */
-  .btn-group {
-    display: inline-flex;
-    vertical-align: middle;
-  }
-  
-  .btn-group .btn {
-    position: relative;
-    border-radius: 0;
-  }
-  
-  .btn-group .btn:first-child {
-    border-top-left-radius: 0.375rem;
-    border-bottom-left-radius: 0.375rem;
-  }
-  
-  .btn-group .btn:last-child {
-    border-top-right-radius: 0.375rem;
-    border-bottom-right-radius: 0.375rem;
-  }
-  
-  .btn-group-sm .btn {
+  .btn-sm {
     padding: 0.25rem 0.5rem;
     font-size: 0.875rem;
   }
   
-  /* DataTable row styling - very specific selectors to override defaults */
-  table.dataTable.hover tbody tr.selected,
-  table.dataTable.display tbody tr.selected,
-  table.dataTable tbody tr.selected,
-  table.dataTable tbody tr.selected > td,
-  table.dataTable.row-border tbody tr.selected > td,
-  table.dataTable.cell-border tbody tr.selected > td {
-    background-color: rgba(13, 110, 253, 0.08) !important;
-    box-shadow: inset 0 0 0 9999px rgba(13, 110, 253, 0.08) !important;
+  /* Table styling */
+  .table {
+    margin-bottom: 0;
   }
   
-  table.dataTable tbody tr.selected:hover,
-  table.dataTable tbody tr.selected:hover > td {
-    background-color: rgba(13, 110, 253, 0.12) !important;
-    box-shadow: inset 0 0 0 9999px rgba(13, 110, 253, 0.12) !important;
+  .table-striped > tbody > tr:nth-of-type(odd) > * {
+    background-color: rgba(0,0,0,0.02);
   }
   
-  table.dataTable.row-border tbody tr:hover,
-  table.dataTable.row-border tbody tr:hover > td {
-    background-color: rgba(13, 110, 253, 0.05) !important;
-  }
-  
-  table.dataTable.compact tbody td {
-    padding: 0.5rem;
-  }
-  
-  /* Custom alert styling */
+  /* Alert styling */
   .alert {
     border-radius: 0.375rem;
-    border: 1px solid transparent;
   }
   
-  /* Loading spinner */
-  .spinner-border {
-    display: inline-block;
-    width: 2rem;
-    height: 2rem;
-    vertical-align: text-bottom;
-    border: 0.25em solid currentColor;
-    border-right-color: transparent;
-    border-radius: 50%;
-    animation: spinner-border 0.75s linear infinite;
+  /* Badge styling */
+  .badge {
+    font-weight: 500;
+    padding: 0.35em 0.65em;
   }
   
-  @keyframes spinner-border {
-    to { transform: rotate(360deg); }
+  /* Modal styling */
+  .modal-content {
+    border-radius: 0.375rem;
+    border: none;
+    box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.15);
   }
   
-  .visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0,0,0,0);
-    white-space: nowrap;
-    border: 0;
+  .modal-header {
+    border-bottom: 1px solid #dee2e6;
+    background-color: #f8f9fa;
   }
   
-  .shiny-busy-panel {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 9999;
+  .modal-footer {
+    border-top: 1px solid #dee2e6;
+    background-color: #f8f9fa;
+  }
+  
+  /* Form styling */
+  .form-control, .form-select {
+    border-radius: 0.375rem;
+    border: 1px solid #ced4da;
+  }
+  
+  .form-control:focus, .form-select:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.25rem rgba(13,110,253,0.25);
+  }
+  
+  /* DataTable styling */
+  .dataTables_wrapper {
+    font-size: 0.95rem;
+  }
+  
+  .dataTables_filter input {
+    border-radius: 0.375rem;
+    border: 1px solid #ced4da;
+    padding: 0.375rem 0.75rem;
+    margin-left: 0.5rem;
+  }
+  
+  /* Plotly plot styling */
+  .plotly {
+    border-radius: 0.375rem;
+  }
+  
+  /* Progress bar styling */
+  .progress {
+    border-radius: 0.375rem;
+    height: 1.5rem;
+  }
+  
+  /* Notification styling */
+  .shiny-notification {
+    border-radius: 0.375rem;
+    border: none;
+    box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.15);
+  }
+  
+  /* Custom spacing helpers */
+  .me-2 {
+    margin-right: 0.5rem !important;
+  }
+  
+  .me-3 {
+    margin-right: 1rem !important;
+  }
+  
+  .ms-2 {
+    margin-left: 0.5rem !important;
+  }
+  
+  .mt-2 {
+    margin-top: 0.5rem !important;
+  }
+  
+  .mb-2 {
+    margin-bottom: 0.5rem !important;
+  }
+  
+  .mt-3 {
+    margin-top: 1rem !important;
+  }
+  
+  .mb-3 {
+    margin-bottom: 1rem !important;
+  }
+  
+  /* Grid gap utility for button stacks */
+  .d-grid.gap-2 {
+    display: grid !important;
+    gap: 0.5rem !important;
+  }
+  
+  /* Responsive adjustments */
+  @media (max-width: 768px) {
+    .navbar-brand {
+      font-size: 1rem;
+    }
+    
+    .card {
+      margin-bottom: 0.75rem;
+    }
   }
   "
 }
