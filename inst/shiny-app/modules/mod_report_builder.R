@@ -213,6 +213,7 @@ mod_report_builder_server <- function(id, app_data) {
     
     # Get list of selected metric keys from checkboxes
     get_selected_metrics <- function() {
+      # All possible metric keys
       all_keys <- c(
         # Peak Heights
         "peak_1", "peak_2", "peak_3", "peak_f",
@@ -230,9 +231,22 @@ mod_report_builder_server <- function(id, app_data) {
         "min_dcp", "tmin", "median_dcp"
       )
       
-      Filter(function(key) {
-        isTRUE(input[[paste0("metric_", key)]])
-      }, all_keys)
+      # Check each checkbox input
+      selected <- character()
+      for (key in all_keys) {
+        input_name <- paste0("metric_", key)
+        # Explicitly check if checkbox is TRUE
+        value <- input[[input_name]]
+        
+        if (!is.null(value) && isTRUE(value)) {
+          selected <- c(selected, key)
+          cat(sprintf("[REPORT_BUILDER] Checkbox '%s' is checked\n", key))
+        }
+      }
+      
+      cat(sprintf("[REPORT_BUILDER] Total selected: %d metrics\n", length(selected)))
+      
+      return(selected)
     }
     
     # ==========================================================================
@@ -684,7 +698,11 @@ mod_report_builder_server <- function(id, app_data) {
       )
       
       lapply(all_keys, function(key) {
-        shinyjs::runjs(sprintf("$('#%s').prop('checked', true);", ns(paste0("metric_", key))))
+        # FIXED: Trigger 'change' event after setting checked state
+        shinyjs::runjs(sprintf(
+          "$('#%s').prop('checked', true).trigger('change');", 
+          ns(paste0("metric_", key))
+        ))
       })
     })
     
@@ -699,7 +717,11 @@ mod_report_builder_server <- function(id, app_data) {
       )
       
       lapply(all_keys, function(key) {
-        shinyjs::runjs(sprintf("$('#%s').prop('checked', false);", ns(paste0("metric_", key))))
+        # FIXED: Trigger 'change' event after setting checked state
+        shinyjs::runjs(sprintf(
+          "$('#%s').prop('checked', false).trigger('change');", 
+          ns(paste0("metric_", key))
+        ))
       })
     })
     
@@ -718,7 +740,12 @@ mod_report_builder_server <- function(id, app_data) {
       
       lapply(all_keys, function(key) {
         checked <- if(key %in% default_keys) "true" else "false"
-        shinyjs::runjs(sprintf("$('#%s').prop('checked', %s);", ns(paste0("metric_", key)), checked))
+        # FIXED: Trigger 'change' event after setting checked state
+        shinyjs::runjs(sprintf(
+          "$('#%s').prop('checked', %s).trigger('change');", 
+          ns(paste0("metric_", key)), 
+          checked
+        ))
       })
     })
     

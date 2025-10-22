@@ -17,12 +17,16 @@ detect_file_type <- function(file_path) {
   }
 }
 
-#' Read thermogram data file
-#'
-#' @param file_path Path to uploaded file
-#' @param file_type Type of file ("csv" or "excel")
-#' @return Data frame with thermogram data
-read_thermogram_file <- function(file_path, file_type) {
+#' Read Thermogram File (CSV or Excel)
+#' 
+#' @param filepath Path to the file
+#' @param temp_min Minimum temperature to include (default: NULL = no filtering)
+#' @param temp_max Maximum temperature to include (default: NULL = no filtering)
+#' 
+#' @return List with data and format_info, or NULL on error
+#' 
+#' @export
+read_thermogram_file <- function(filepath, temp_min = NULL, temp_max = NULL) {
   
   tryCatch({
     if (file_type == "csv") {
@@ -34,7 +38,46 @@ read_thermogram_file <- function(file_path, file_type) {
       data <- readxl::read_excel(file_path)
     }
     
-    return(data)
+    # Apply temperature filtering if specified
+    if (!is.null(temp_min) || !is.null(temp_max)) {
+      
+      cat(sprintf("[READ] Applying temperature filter: %.1f to %.1f°C\n",
+                  ifelse(is.null(temp_min), -Inf, temp_min),
+                  ifelse(is.null(temp_max), Inf, temp_max)))
+      
+      # Filter each sample's temperature data
+      for (sample_name in names(data)) {
+        sample_data <- data[[sample_name]]
+        
+        # Assume temperature column exists
+        if ("Temperature" %in% names(sample_data)) {
+          
+          # Create filter mask
+          keep_mask <- rep(TRUE, nrow(sample_data))
+          
+          if (!is.null(temp_min)) {
+            keep_mask <- keep_mask & (sample_data$Temperature >= temp_min)
+          }
+          
+          if (!is.null(temp_max)) {
+            keep_mask <- keep_mask & (sample_data$Temperature <= temp_max)
+          }
+          
+          # Apply filter
+          data[[sample_name]] <- sample_data[keep_mask, , drop = FALSE]
+          
+          cat(sprintf("[READ] Sample %s: kept %d/%d points\n",
+                      sample_name,
+                      sum(keep_mask),
+                      length(keep_mask)))
+        }
+      }
+    }    
+    
+    return(list(
+      data = data,
+      format_info = format_info
+    ))
     
   }, error = function(e) {
     stop(paste("Error reading file:", e$message))
