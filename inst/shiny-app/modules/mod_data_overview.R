@@ -393,39 +393,46 @@ mod_data_overview_server <- function(id, app_data) {
           title = tagList(icon("upload"), " Upload Raw Thermogram Data"),
           size = "l",
           
-          # File input
-          fileInput(
-            ns("file_upload"),
-            "Choose CSV or Excel file",
-            accept = c(".csv", ".xlsx", ".xls"),
-            multiple = FALSE
-          ),
-          
-          hr(),
-          
-          # Temperature filtering section
-          h5(icon("filter"), " Temperature Filtering"),
+          # File input and temperature filtering in SAME ROW
           fluidRow(
             column(
               6,
+              fileInput(
+                ns("file_upload"),
+                "Choose CSV or Excel file",
+                accept = c(".csv", ".xlsx", ".xls"),
+                multiple = FALSE
+              )
+            ),
+            column(
+              3,
               numericInput(
                 ns("temp_min"),
-                "Minimum Temperature (°C)",
+                "Min Temp (°C)",
                 value = 20,
                 min = 0,
                 max = 100
               )
             ),
             column(
-              6,
+              3,
               numericInput(
                 ns("temp_max"),
-                "Maximum Temperature (°C)",
+                "Max Temp (°C)",
                 value = 110,
                 min = 0,
                 max = 150
               )
             )
+          ),
+          
+          # DATA PREVIEW SECTION 
+          hr(),
+          h5(icon("table"), " Data Preview"),
+          div(
+            id = ns("upload_preview_container"),
+            style = "min-height: 150px;",
+            em("Upload a file to see preview of first 5 rows...")
           ),
           
           hr(),
@@ -444,26 +451,36 @@ mod_data_overview_server <- function(id, app_data) {
             div(
               id = ns("advanced_options"),
               
+              h6(class = "text-muted mb-3", "Baseline Detection Parameters"),
+              
               fluidRow(
                 column(
                   6,
                   numericInput(
-                    ns("min_peak_height"),
-                    "Minimum Peak Height",
-                    value = 0.1,
-                    min = 0,
-                    step = 0.01
-                  )
+                    ns("window_size"),
+                    "Window Size",
+                    value = 90,
+                    min = 10,
+                    max = 200,
+                    step = 10
+                  ),
+                  tags$small(class = "form-text text-muted",
+                             "Points for rolling variance calculation")
                 ),
                 column(
                   6,
-                  numericInput(
-                    ns("min_peak_prominence"),
-                    "Minimum Peak Prominence",
-                    value = 0.05,
-                    min = 0,
-                    step = 0.01
-                  )
+                  selectInput(
+                    ns("point_selection"),
+                    "Endpoint Selection",
+                    choices = c(
+                      "Innermost" = "innermost",
+                      "Outmost" = "outmost",
+                      "Middle" = "middle"
+                    ),
+                    selected = "innermost"
+                  ),
+                  tags$small(class = "form-text text-muted",
+                             "Strategy for selecting endpoints")
                 )
               ),
               
@@ -471,24 +488,42 @@ mod_data_overview_server <- function(id, app_data) {
                 column(
                   6,
                   numericInput(
-                    ns("peak_width_fraction"),
-                    "Peak Width Fraction",
-                    value = 0.05,
-                    min = 0,
-                    max = 1,
-                    step = 0.01
-                  )
+                    ns("exclusion_lower"),
+                    "Exclusion Lower (°C)",
+                    value = 60,
+                    min = 40,
+                    max = 80
+                  ),
+                  tags$small(class = "form-text text-muted",
+                             "Lower bound of transition region")
                 ),
                 column(
                   6,
                   numericInput(
-                    ns("spline_spar"),
-                    "Spline Smoothing (spar)",
-                    value = 0.6,
-                    min = 0,
-                    max = 1,
-                    step = 0.1
-                  )
+                    ns("exclusion_upper"),
+                    "Exclusion Upper (°C)",
+                    value = 80,
+                    min = 60,
+                    max = 95
+                  ),
+                  tags$small(class = "form-text text-muted",
+                             "Upper bound of transition region")
+                )
+              ),
+              
+              fluidRow(
+                column(
+                  6,
+                  numericInput(
+                    ns("grid_resolution"),
+                    "Grid Resolution (°C)",
+                    value = 0.1,
+                    min = 0.01,
+                    max = 1.0,
+                    step = 0.05
+                  ),
+                  tags$small(class = "form-text text-muted",
+                             "Temperature step for output grid")
                 )
               )
             )
@@ -498,7 +533,7 @@ mod_data_overview_server <- function(id, app_data) {
             modalButton("Cancel"),
             actionButton(
               ns("confirm_upload"),
-              "Upload & Process",
+              "Upload Data",
               class = "btn-primary",
               icon = icon("check")
             )
@@ -507,6 +542,90 @@ mod_data_overview_server <- function(id, app_data) {
         )
       )
     })
+    
+    # Show data preview when file is selected
+    observeEvent(input$file_upload, {
+      req(input$file_upload)
+      
+      # Try to read and preview the file
+      preview_result <- tryCatch({
+        file_info <- input$file_upload
+        
+        # Determine file type and read
+        if (grepl("\\.csv$", file_info$name, ignore.case = TRUE)) {
+          data <- readr::read_csv(file_info$datapath, show_col_types = FALSE)
+        } else if (grepl("\\.(xlsx|xls)$", file_info$name, ignore.case = TRUE)) {
+          data <- readxl::read_excel(file_info$datapath)
+        } else {
+          return(list(success = FALSE, message = "Unsupported file type"))
+        }
+        
+        # Get first 5 rows for preview
+        preview_data <- head(data, 5)
+        
+        list(
+          success = TRUE, 
+          data = preview_data, 
+          nrow = nrow(data), 
+          ncol = ncol(data),
+          filename = file_info$name
+        )
+        
+      }, error = function(e) {
+        list(success = FALSE, message = paste("Error reading file:", e$message))
+      })
+      
+      # Render the preview table
+      if (preview_result$success) {
+        output$upload_preview <- DT::renderDT({
+          DT::datatable(
+            preview_result$data,
+            options = list(
+              dom = 't',  # Just table, no controls
+              scrollX = TRUE,
+              pageLength = 5,
+              ordering = FALSE
+            ),
+            rownames = FALSE,
+            class = 'table table-sm table-striped'
+          )
+        })
+        
+        # Update container with info banner and show the table
+        removeUI(selector = paste0("#", ns("upload_preview_container"), " > *"))
+        
+        insertUI(
+          selector = paste0("#", ns("upload_preview_container")),
+          where = "beforeEnd",
+          ui = tagList(
+            div(
+              class = "alert alert-info mb-2",
+              style = "padding: 0.5rem 1rem;",
+              icon("info-circle"), " ",
+              sprintf("File: %s | Rows: %d | Columns: %d", 
+                      preview_result$filename, 
+                      preview_result$nrow, 
+                      preview_result$ncol)
+            ),
+            DT::DTOutput(ns("upload_preview"))
+          )
+        )
+        
+      } else {
+        # Show error message
+        removeUI(selector = paste0("#", ns("upload_preview_container"), " > *"))
+        
+        insertUI(
+          selector = paste0("#", ns("upload_preview_container")),
+          where = "beforeEnd",
+          ui = div(
+            class = "alert alert-danger",
+            icon("exclamation-triangle"), " ",
+            preview_result$message
+          )
+        )
+      }
+    })  
     
     # Toggle advanced options visibility
     observeEvent(input$toggle_advanced, {
@@ -531,7 +650,7 @@ mod_data_overview_server <- function(id, app_data) {
         showNotification(
           sprintf("Error reading file: %s", e$message),
           type = "error",
-          duration = 5
+          duration = 3
         )
         return(NULL)
       })
@@ -561,10 +680,11 @@ mod_data_overview_server <- function(id, app_data) {
         temp_params = list(
           temp_min = input$temp_min,
           temp_max = input$temp_max,
-          min_peak_height = input$min_peak_height,
-          min_peak_prominence = input$min_peak_prominence,
-          peak_width_fraction = input$peak_width_fraction,
-          spline_spar = input$spline_spar
+          window_size = input$window_size,
+          exclusion_lower = input$exclusion_lower,
+          exclusion_upper = input$exclusion_upper,
+          grid_resolution = input$grid_resolution,
+          point_selection = input$point_selection
         )
       )
       
@@ -576,7 +696,7 @@ mod_data_overview_server <- function(id, app_data) {
       showNotification(
         sprintf("Uploaded %s (%d samples)", file_info$name, result$format_info$n_samples),
         type = "message",
-        duration = 3
+        duration = 2
       )
       
       removeModal()
@@ -713,20 +833,23 @@ mod_data_overview_server <- function(id, app_data) {
         type = "message"
       )
       
-      # Call baseline detection utility function
+      cat(sprintf("\n[PROCESS] Starting processing for: %s\n", dataset_id))
+      
+      # Call processing utility function
       result <- tryCatch({
         process_thermogram_data(
-          dataset$data,
-          dataset$format_info,
-          dataset$temp_params
+          data = dataset$data,
+          format_info = dataset$format_info,
+          temp_params = dataset$temp_params
         )
       }, error = function(e) {
         removeNotification("processing")
         showNotification(
           sprintf("Processing error: %s", e$message),
           type = "error",
-          duration = 5
+          duration = 3
         )
+        cat(sprintf("[PROCESS] ERROR: %s\n", e$message))
         return(NULL)
       })
       
@@ -742,16 +865,19 @@ mod_data_overview_server <- function(id, app_data) {
       datasets[[dataset_id]]$processed_data <- result
       uploaded_datasets(datasets)
       
-      cat(sprintf("[PROCESS] Successfully processed: %s\n", dataset_id))
+      cat(sprintf("[PROCESS] Successfully processed: %s (%d samples, %d with signal)\n", 
+                  dataset_id, result$n_samples, result$n_signal))
       
       showNotification(
         sprintf(
-          "Processed %s (%d samples)",
+          "Processed %s: %d samples (%d with signal, %d no signal)",
           dataset$file_name,
-          length(result$samples)
+          result$n_samples,
+          result$n_signal,
+          result$n_no_signal
         ),
         type = "message",
-        duration = 3
+        duration = 2
       )
     }
     
@@ -793,7 +919,7 @@ mod_data_overview_server <- function(id, app_data) {
             actionButton(
               ns(paste0("report_", dataset$id)),
               "Create Report",
-              icon = icon("file-chart-line"),
+              icon = icon("file-alt"),
               class = "btn-sm btn-success"
             )
           )
@@ -817,7 +943,7 @@ mod_data_overview_server <- function(id, app_data) {
             actionButton(
               ns(paste0("report_", dataset$id)),
               "Create Report",
-              icon = icon("file-chart-line"),
+              icon = icon("file-alt"),
               class = "btn-sm btn-success"
             )
           )
@@ -927,7 +1053,7 @@ mod_data_overview_server <- function(id, app_data) {
       showNotification(
         sprintf("Loaded %s for review", dataset$file_name),
         type = "message",
-        duration = 3
+        duration = 2
       )
     }
     
@@ -966,7 +1092,7 @@ mod_data_overview_server <- function(id, app_data) {
       showNotification(
         sprintf("Loaded %s for report generation", dataset$file_name),
         type = "message",
-        duration = 3
+        duration = 2
       )
     }
     
@@ -1093,7 +1219,7 @@ mod_data_overview_server <- function(id, app_data) {
         showNotification(
           sprintf("Saved: %s", result$filename),
           type = "message",
-          duration = 3
+          duration = 2
         )
         
         # Refresh saved files list
@@ -1103,7 +1229,7 @@ mod_data_overview_server <- function(id, app_data) {
         showNotification(
           sprintf("Save failed: %s", result$message),
           type = "error",
-          duration = 5
+          duration = 3
         )
       }
       
@@ -1285,7 +1411,7 @@ mod_data_overview_server <- function(id, app_data) {
         showNotification(
           sprintf("Load failed: %s", result$message),
           type = "error",
-          duration = 5
+          duration = 3
         )
         removeModal()
         return()
@@ -1331,7 +1457,7 @@ mod_data_overview_server <- function(id, app_data) {
             filename
           )),
           type = "message",
-          duration = 5
+          duration = 2
         )
       } else {
         showNotification(
@@ -1340,7 +1466,7 @@ mod_data_overview_server <- function(id, app_data) {
             filename
           )),
           type = "warning",
-          duration = 5
+          duration = 3
         )
       }
     })
@@ -1415,7 +1541,7 @@ mod_data_overview_server <- function(id, app_data) {
         showNotification(
           sprintf("Deleted: %s", filename),
           type = "message",
-          duration = 3
+          duration = 2
         )
         
         # Refresh saved files list
@@ -1425,7 +1551,7 @@ mod_data_overview_server <- function(id, app_data) {
         showNotification(
           sprintf("Delete failed: %s", result$message),
           type = "error",
-          duration = 5
+          duration = 3
         )
       }
       
@@ -1578,7 +1704,7 @@ mod_data_overview_server <- function(id, app_data) {
         showNotification(
           "Report file not found. It may have been moved or deleted.",
           type = "error",
-          duration = 5
+          duration = 3
         )
         return()
       }
@@ -1596,7 +1722,7 @@ mod_data_overview_server <- function(id, app_data) {
       showNotification(
         sprintf("Downloading: %s", report$name),
         type = "message",
-        duration = 3
+        duration = 2
       )
     })
     
@@ -1681,7 +1807,7 @@ mod_data_overview_server <- function(id, app_data) {
       showNotification(
         sprintf("Removed report from list: %s", report_name),
         type = "message",
-        duration = 3
+        duration = 2
       )
       
       removeModal()
@@ -1739,7 +1865,7 @@ mod_data_overview_server <- function(id, app_data) {
         showNotification(
           "Opening reports folder in file browser...",
           type = "message",
-          duration = 3
+          duration = 2
         )
       } else {
         showNotification(
@@ -1748,7 +1874,7 @@ mod_data_overview_server <- function(id, app_data) {
             reports_dir
           )),
           type = "warning",
-          duration = 8
+          duration = 3
         )
       }
     })
