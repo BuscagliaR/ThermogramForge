@@ -324,8 +324,11 @@ mod_review_endpoints_server <- function(id, app_data) {
     sample_grid_data <- reactive({
       req(app_data$processed_data)
       
+      cat("[GRID_DATA] Building sample grid data\n")
+      
       samples <- app_data$processed_data$samples
       
+      # Initialize empty data frame with correct structure
       grid_df <- data.frame(
         ID = character(),
         Signal = character(),
@@ -336,25 +339,39 @@ mod_review_endpoints_server <- function(id, app_data) {
         stringsAsFactors = FALSE
       )
       
+      # Build grid data from samples
       for (sample_id in names(samples)) {
         sample <- samples[[sample_id]]
         
-        if (sample$success) {
-          signal_icon <- if (sample$has_signal) "✓" else "✗"
+        # Only include successfully processed samples
+        if (isTRUE(sample$success)) {
           
-          lower_manual <- if(is.null(sample$lower_manual)) FALSE else sample$lower_manual
-          upper_manual <- if(is.null(sample$upper_manual)) FALSE else sample$upper_manual
+          # Signal indicator
+          signal_icon <- if (isTRUE(sample$has_signal)) "✓" else "✗"
           
-          lower_text <- sprintf("%.1f°C (%s)", 
-                                sample$lower_endpoint, 
-                                if(lower_manual) "Manual" else "Auto")
-          upper_text <- sprintf("%.1f°C (%s)", 
-                                sample$upper_endpoint, 
-                                if(upper_manual) "Manual" else "Auto")
+          # Manual adjustment indicators - USE isTRUE() for safety
+          # isTRUE() returns FALSE for NULL, missing fields, NA, or logical(0)
+          lower_manual <- isTRUE(sample$lower_manual)
+          upper_manual <- isTRUE(sample$upper_manual)
           
-          reviewed_icon <- if (is.null(sample$reviewed) || !sample$reviewed) "—" else "✓"
-          excluded_icon <- if (is.null(sample$excluded) || !sample$excluded) "" else "✗"
+          # Format endpoint text with manual/auto indicator
+          lower_text <- sprintf(
+            "%.1f°C (%s)", 
+            sample$lower_endpoint, 
+            if (lower_manual) "Manual" else "Auto"
+          )
           
+          upper_text <- sprintf(
+            "%.1f°C (%s)", 
+            sample$upper_endpoint, 
+            if (upper_manual) "Manual" else "Auto"
+          )
+          
+          # Status indicators - USE isTRUE() for safety
+          reviewed_icon <- if (isTRUE(sample$reviewed)) "✓" else "—"
+          excluded_icon <- if (isTRUE(sample$excluded)) "✗" else ""
+          
+          # Add row to grid
           grid_df <- rbind(grid_df, data.frame(
             ID = sample_id,
             Signal = signal_icon,
@@ -364,11 +381,19 @@ mod_review_endpoints_server <- function(id, app_data) {
             Exclude = excluded_icon,
             stringsAsFactors = FALSE
           ))
+          
+          cat(sprintf("[GRID_DATA]   Added sample: %s (manual: L=%s U=%s)\n", 
+                      sample_id, lower_manual, upper_manual))
+        } else {
+          cat(sprintf("[GRID_DATA]   Skipped sample: %s (success=FALSE)\n", sample_id))
         }
       }
       
+      cat(sprintf("[GRID_DATA] ✓ Built grid with %d rows\n", nrow(grid_df)))
+      
       grid_df
     })
+    
     
     output$sample_grid <- DT::renderDataTable({
       req(app_data$processed_data)
