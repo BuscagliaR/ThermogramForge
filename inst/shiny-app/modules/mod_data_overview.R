@@ -341,7 +341,8 @@ mod_data_overview_server <- function(id, app_data) {
     dataset_counter <- reactiveVal(0)
     
     # Tracker for which observers have been created (prevents duplicates)
-    created_observers <- reactiveVal(character(0))
+    created_observers_unprocessed <- reactiveVal(character(0))
+    created_observers_processed <- reactiveVal(character(0))
     
     # Trigger for refreshing saved files list
     saved_files_trigger <- reactiveVal(0)
@@ -351,6 +352,8 @@ mod_data_overview_server <- function(id, app_data) {
       saved_files_trigger()  # Depend on trigger
       list_processed_datasets()  # Call utility function
     })
+    
+    ui_refresh_trigger <- reactiveVal(0)
     
     # =========================================================================
     # SUMMARY COUNTS (Output: Summary Cards)
@@ -772,41 +775,55 @@ mod_data_overview_server <- function(id, app_data) {
     # Create dynamic observers for unprocessed dataset buttons
     # This observer watches for new datasets and creates button handlers
     observe({
+      # Depend on uploaded_datasets (do NOT use isolate here!)
       datasets <- uploaded_datasets()
-      existing_obs <- created_observers()
+      existing_obs <- isolate(created_observers_unprocessed())  # ← CHANGED
       
       # Get IDs of unprocessed datasets
       dataset_ids <- names(Filter(function(d) d$status == "unprocessed", datasets))
       
+      cat(sprintf("\n[OBSERVERS_UNPROC] Check triggered\n"))
+      cat(sprintf("[OBSERVERS_UNPROC] Unprocessed IDs: %s\n", 
+                  ifelse(length(dataset_ids) > 0, paste(dataset_ids, collapse=", "), "none")))
+      cat(sprintf("[OBSERVERS_UNPROC] Existing trackers: %s\n", 
+                  ifelse(length(existing_obs) > 0, paste(existing_obs, collapse=", "), "none")))
+      
       # Only create observers for datasets we haven't seen before
       new_ids <- setdiff(dataset_ids, existing_obs)
       
-      lapply(new_ids, function(dataset_id) {
+      if (length(new_ids) > 0) {
+        cat(sprintf("[OBSERVERS_UNPROC] Creating observers for: %s\n", 
+                    paste(new_ids, collapse=", ")))
         
-        # Process button observer
-        local({
-          did <- dataset_id
-          observeEvent(input[[paste0("process_", did)]], {
-            cat(sprintf("\n[PROCESS] Starting processing for: %s\n", did))
-            process_dataset(did)
-          }, ignoreInit = TRUE)
+        lapply(new_ids, function(dataset_id) {
+          
+          # Process button observer
+          local({
+            did <- dataset_id
+            observeEvent(input[[paste0("process_", did)]], {
+              cat(sprintf("\n[PROCESS_BTN] Process clicked: %s\n", did))
+              process_dataset(did)
+            }, ignoreInit = TRUE)
+          })
+          
+          # Remove button observer
+          local({
+            did <- dataset_id
+            observeEvent(input[[paste0("remove_", did)]], {
+              cat(sprintf("[REMOVE_BTN] Remove clicked: %s\n", did))
+              current <- uploaded_datasets()
+              current[[did]] <- NULL
+              uploaded_datasets(current)
+              showNotification("Dataset removed", type = "message", duration = 2)
+            }, ignoreInit = TRUE)
+          })
         })
         
-        # Remove button observer
-        local({
-          did <- dataset_id
-          observeEvent(input[[paste0("remove_", did)]], {
-            cat(sprintf("[REMOVE] Removing dataset: %s\n", did))
-            current <- uploaded_datasets()
-            current[[did]] <- NULL
-            uploaded_datasets(current)
-            showNotification("Dataset removed", type = "message", duration = 2)
-          }, ignoreInit = TRUE)
-        })
-      })
-      
-      # Update tracker to include new observers
-      created_observers(c(existing_obs, new_ids))
+        # Update tracker to include new observers
+        created_observers_unprocessed(c(existing_obs, new_ids))  # ← CHANGED
+        cat(sprintf("[OBSERVERS_UNPROC] ✓ Updated tracker: %s\n\n", 
+                    paste(c(existing_obs, new_ids), collapse=", ")))
+      }
     })
     
     # =========================================================================
@@ -860,10 +877,22 @@ mod_data_overview_server <- function(id, app_data) {
         return()
       }
       
-      # Update dataset with results
-      datasets[[dataset_id]]$status <- "processed"
-      datasets[[dataset_id]]$processed_data <- result
+      # After processing succeeds:
+      dataset$status <- "processed"
+      dataset$processed_data <- result  # result from process_thermogram_data()
+      
+      # Update in reactive
+      datasets[[dataset_id]] <- dataset
       uploaded_datasets(datasets)
+      
+      cat(sprintf("[PROCESS] ✓ Dataset status set to: %s\n", dataset$status))
+      cat(sprintf("[PROCESS] ✓ This should trigger observer creation\n\n"))
+      
+      
+      # Refresh UI
+      ui_refresh_trigger(isolate(ui_refresh_trigger()) + 1)
+      cat(sprintf("[PROCESS] ✓ UI refresh triggered (count: %d)\n", 
+                  isolate(ui_refresh_trigger())))
       
       cat(sprintf("[PROCESS] Successfully processed: %s (%d samples, %d with signal)\n", 
                   dataset_id, result$n_samples, result$n_signal))
@@ -886,13 +915,53 @@ mod_data_overview_server <- function(id, app_data) {
     # =========================================================================
     
     output$processed_files_ui <- renderUI({
+      
+      # CRITICAL: Force dependency on ui_refresh_trigger
+      trigger_count <- ui_refresh_trigger()
+      
+      # CRITICAL: Depend on uploaded_datasets WITHOUT isolate
       datasets <- uploaded_datasets()
       
+      # DEBUG: Log that renderUI was triggered
+      cat(sprintf("\n╔════════════════════════════════════╗\n"))
+      cat(sprintf("║   PROCESSED UI RENDER TRIGGERED    ║\n"))
+      cat(sprintf("╚════════════════════════════════════╝\n"))
+      cat(sprintf("[PROCESSED_UI] Trigger count: %d\n", trigger_count))
+      cat(sprintf("[PROCESSED_UI] Total datasets: %d\n", length(datasets)))
+      
+      if (length(datasets) == 0) {
+        cat("[PROCESSED_UI] No datasets in session\n\n")
+        return(
+          p(
+            class = "text-muted",
+            "No datasets in session. Click 'Upload New Data' to begin."
+          )
+        )
+      }
+      
+      # Log all datasets and their statuses
+      cat("[PROCESSED_UI] All datasets:\n")
+      for (did in names(datasets)) {
+        cat(sprintf("[PROCESSED_UI]   - %s: status='%s', file='%s'\n", 
+                    did, datasets[[did]]$status, datasets[[did]]$file_name))
+      }
+      
       # Filter to processed only (including loaded from disk)
-      processed <- Filter(function(d) d$status %in% c("processed", "loaded"), datasets)
+      processed <- Filter(function(d) {
+        is_processed <- d$status %in% c("processed", "loaded")
+        if (is_processed) {
+          cat(sprintf("[PROCESSED_UI] ✓ Including: %s (status: %s)\n", 
+                      d$id, d$status))
+        }
+        is_processed
+      }, datasets)
+      
+      cat(sprintf("[PROCESSED_UI] Filtered result: %d processed dataset(s)\n", 
+                  length(processed)))
       
       # Show message if no processed files
       if (length(processed) == 0) {
+        cat("[PROCESSED_UI] Returning placeholder message\n\n")
         return(
           p(
             class = "text-muted",
@@ -901,66 +970,69 @@ mod_data_overview_server <- function(id, app_data) {
         )
       }
       
-      # Create UI row for each processed dataset
+      # Create UI rows for each processed dataset
+      cat(sprintf("[PROCESSED_UI] Building UI for %d dataset(s)...\n", length(processed)))
+      
       rows <- lapply(processed, function(dataset) {
         
-        # Determine badge and buttons based on status
-        if (dataset$status == "loaded") {
-          # Dataset loaded from disk - no save option
-          badge_class <- "bg-info"
-          badge_text <- "Loaded from Disk"
-          button_set <- tagList(
-            actionButton(
-              ns(paste0("review_", dataset$id)),
-              "Review Endpoints",
-              icon = icon("search"),
-              class = "btn-sm btn-primary"
-            ),
-            actionButton(
-              ns(paste0("report_", dataset$id)),
-              "Create Report",
-              icon = icon("file-alt"),
-              class = "btn-sm btn-success"
-            )
+        cat(sprintf("[PROCESSED_UI]   Building row for: %s\n", dataset$id))
+        
+        # Action buttons for this dataset
+        button_set <- div(
+          class = "btn-group-sm",
+          role = "group",
+          actionButton(
+            ns(paste0("review_", dataset$id)),
+            "Review Endpoints",
+            icon = icon("chart-line"),
+            class = "btn-primary btn-sm me-1"
+          ),
+          actionButton(
+            ns(paste0("save_", dataset$id)),
+            "Save to Disk",
+            icon = icon("save"),
+            class = "btn-success btn-sm me-1"
+          ),
+          actionButton(
+            ns(paste0("report_", dataset$id)),
+            "Create Report",
+            icon = icon("file-alt"),
+            class = "btn-info btn-sm"
           )
+        )
+        
+        # Determine badge based on status
+        status_badge <- if (dataset$status == "loaded") {
+          tags$span(class = "badge bg-info ms-2", "Loaded")
         } else {
-          # Dataset processed in this session - can save
-          badge_class <- "bg-success"
-          badge_text <- "Processed"
-          button_set <- tagList(
-            actionButton(
-              ns(paste0("review_", dataset$id)),
-              "Review Endpoints",
-              icon = icon("search"),
-              class = "btn-sm btn-primary"
-            ),
-            actionButton(
-              ns(paste0("save_", dataset$id)),
-              "Save to Disk",
-              icon = icon("save"),
-              class = "btn-sm btn-info"
-            ),
-            actionButton(
-              ns(paste0("report_", dataset$id)),
-              "Create Report",
-              icon = icon("file-alt"),
-              class = "btn-sm btn-success"
-            )
-          )
+          tags$span(class = "badge bg-success ms-2", "Processed")
         }
         
-        # Return row HTML
+        # Sample count
+        n_samples <- if (!is.null(dataset$processed_data) && 
+                         !is.null(dataset$processed_data$samples)) {
+          length(dataset$processed_data$samples)
+        } else {
+          "?"
+        }
+        
+        cat(sprintf("[PROCESSED_UI]     - Samples: %s, Status: %s\n", 
+                    n_samples, dataset$status))
+        
+        # Return row HTML with clear styling
         div(
-          class = "d-flex justify-content-between align-items-center mb-2 p-3 border rounded",
+          class = "d-flex justify-content-between align-items-center mb-2 p-3 border rounded bg-light",
+          style = "border-left: 4px solid #198754 !important;",  # Green left border
           div(
             class = "flex-grow-1",
             div(
-              icon("check-circle"), " ", strong(dataset$file_name),
-              tags$span(class = sprintf("badge %s ms-2", badge_class), badge_text)
+              icon("check-circle", class = "text-success"), " ", 
+              strong(dataset$file_name),
+              status_badge
             ),
             div(
               class = "small text-muted mt-1",
-              sprintf("Samples: %d", length(dataset$processed_data$samples))
+              sprintf("Samples: %s", n_samples)
             )
           ),
           div(
@@ -970,52 +1042,99 @@ mod_data_overview_server <- function(id, app_data) {
         )
       })
       
+      cat(sprintf("[PROCESSED_UI] ✓ Created %d UI row(s)\n", length(rows)))
+      cat(sprintf("╚════════════════════════════════════╝\n\n"))
+      
+      # Return the rows wrapped in tagList
       tagList(rows)
     })
     
-    # Create dynamic observers for processed dataset buttons
+    # =============================================================================
+    # DYNAMIC OBSERVERS: Processed Dataset Action Buttons
+    # =============================================================================
+    # Creates click handlers for Review, Save, and Report buttons on each dataset
+    # Uses local() to create proper closures and ignoreInit = TRUE for clean setup
     observe({
+      # Depend on uploaded_datasets (do NOT use isolate here!)
       datasets <- uploaded_datasets()
-      existing_obs <- created_observers()
+      existing_obs <- isolate(created_observers_processed())  # ← CHANGED
       
-      # Get IDs of processed datasets
-      dataset_ids <- names(Filter(function(d) d$status %in% c("processed", "loaded"), datasets))
+      # Get IDs of ALL processed datasets
+      dataset_ids <- names(Filter(function(d) {
+        d$status %in% c("processed", "loaded")
+      }, datasets))
       
-      # Only create observers for new datasets
+      # Debug logging
+      cat(sprintf("\n[OBSERVERS_PROC] Check triggered\n"))
+      cat(sprintf("[OBSERVERS_PROC] Total datasets: %d\n", length(datasets)))
+      cat(sprintf("[OBSERVERS_PROC] Processed IDs: %s\n", 
+                  ifelse(length(dataset_ids) > 0, paste(dataset_ids, collapse=", "), "none")))
+      cat(sprintf("[OBSERVERS_PROC] Existing trackers: %s\n", 
+                  ifelse(length(existing_obs) > 0, paste(existing_obs, collapse=", "), "none")))
+      
+      # Find datasets that need observers
       new_ids <- setdiff(dataset_ids, existing_obs)
       
-      lapply(new_ids, function(dataset_id) {
+      if (length(new_ids) > 0) {
+        cat(sprintf("[OBSERVERS_PROC] Creating %d new observer(s): %s\n", 
+                    length(new_ids), paste(new_ids, collapse=", ")))
         
-        # Review button observer
-        local({
-          did <- dataset_id
-          observeEvent(input[[paste0("review_", did)]], {
-            cat(sprintf("[NAVIGATE] Review button clicked for: %s\n", did))
-            navigate_to_review(did)
-          }, ignoreInit = TRUE)
+        # Create observers for each new dataset
+        lapply(new_ids, function(dataset_id) {
+          
+          # Review Endpoints Button Observer
+          local({
+            did <- dataset_id
+            button_id <- paste0("review_", did)
+            cat(sprintf("[OBSERVERS_PROC]   - Creating: %s\n", button_id))
+            
+            observeEvent(input[[button_id]], {
+              cat(sprintf("\n╔══════════════════════════════════════╗\n"))
+              cat(sprintf("║  REVIEW BUTTON CLICKED: %-12s ║\n", button_id))
+              cat(sprintf("╚══════════════════════════════════════╝\n"))
+              cat(sprintf("[CLICK] Dataset ID: %s\n", did))
+              navigate_to_review(did)
+            }, ignoreInit = TRUE)
+          })
+          
+          # Save to Disk Button Observer
+          local({
+            did <- dataset_id
+            button_id <- paste0("save_", did)
+            cat(sprintf("[OBSERVERS_PROC]   - Creating: %s\n", button_id))
+            
+            observeEvent(input[[button_id]], {
+              cat(sprintf("\n╔══════════════════════════════════════╗\n"))
+              cat(sprintf("║  SAVE BUTTON CLICKED: %-14s ║\n", button_id))
+              cat(sprintf("╚══════════════════════════════════════╝\n"))
+              cat(sprintf("[CLICK] Dataset ID: %s\n", did))
+              show_save_modal(did)
+            }, ignoreInit = TRUE)
+          })
+          
+          # Create Report Button Observer
+          local({
+            did <- dataset_id
+            button_id <- paste0("report_", did)
+            cat(sprintf("[OBSERVERS_PROC]   - Creating: %s\n", button_id))
+            
+            observeEvent(input[[button_id]], {
+              cat(sprintf("\n╔══════════════════════════════════════╗\n"))
+              cat(sprintf("║  REPORT BUTTON CLICKED: %-12s ║\n", button_id))
+              cat(sprintf("╚══════════════════════════════════════╝\n"))
+              cat(sprintf("[CLICK] Dataset ID: %s\n", did))
+              navigate_to_reports(did)
+            }, ignoreInit = TRUE)
+          })
         })
         
-        # Save button observer
-        local({
-          did <- dataset_id
-          observeEvent(input[[paste0("save_", did)]], {
-            cat(sprintf("[SAVE] Save button clicked for: %s\n", did))
-            show_save_modal(did)
-          }, ignoreInit = TRUE)
-        })
-        
-        # Report button observer
-        local({
-          did <- dataset_id
-          observeEvent(input[[paste0("report_", did)]], {
-            cat(sprintf("[NAVIGATE] Report button clicked for: %s\n", did))
-            navigate_to_reports(did)
-          }, ignoreInit = TRUE)
-        })
-      })
-      
-      # Update tracker
-      created_observers(c(existing_obs, new_ids))
+        # Update the observer tracker
+        created_observers_processed(c(existing_obs, new_ids))  # ← CHANGED
+        cat(sprintf("[OBSERVERS_PROC] ✓ Tracker updated: %s\n\n", 
+                    paste(c(existing_obs, new_ids), collapse=", ")))
+      } else {
+        cat("[OBSERVERS_PROC] No new observers needed\n\n")
+      }
     })
     
     # =========================================================================
@@ -1023,37 +1142,97 @@ mod_data_overview_server <- function(id, app_data) {
     # =========================================================================
     
     navigate_to_review <- function(dataset_id) {
-      datasets <- uploaded_datasets()
-      dataset <- datasets[[dataset_id]]
+      cat(sprintf("\n╔══════════════════════════════════════════════════╗\n"))
+      cat(sprintf("║       NAVIGATE TO REVIEW ENDPOINTS              ║\n"))
+      cat(sprintf("╚══════════════════════════════════════════════════╝\n"))
+      cat(sprintf("[NAVIGATE] Target dataset ID: %s\n", dataset_id))
       
-      # Validate dataset
-      if (is.null(dataset) || is.null(dataset$processed_data)) {
+      # Get all datasets
+      datasets <- uploaded_datasets()
+      
+      # Validate: Dataset exists
+      if (is.null(datasets[[dataset_id]])) {
+        cat(sprintf("[NAVIGATE] ✗ ERROR: Dataset '%s' not found!\n", dataset_id))
+        cat(sprintf("[NAVIGATE] Available datasets: %s\n", 
+                    paste(names(datasets), collapse=", ")))
         showNotification(
-          "Dataset not found or not processed",
+          "Dataset not found in session",
           type = "error",
-          duration = 3
+          duration = 5
         )
         return()
       }
       
-      # Load into shared app_data for Review module
+      dataset <- datasets[[dataset_id]]
+      cat(sprintf("[NAVIGATE] ✓ Dataset found: %s\n", dataset$file_name))
+      cat(sprintf("[NAVIGATE]   Status: %s\n", dataset$status))
+      
+      # Validate: Dataset is processed
+      if (!dataset$status %in% c("processed", "loaded")) {
+        cat(sprintf("[NAVIGATE] ✗ ERROR: Dataset not processed\n"))
+        cat(sprintf("[NAVIGATE]   Current status: %s\n", dataset$status))
+        showNotification(
+          sprintf("Dataset '%s' has not been processed yet", dataset$file_name),
+          type = "warning",
+          duration = 5
+        )
+        return()
+      }
+      
+      # Validate: Processed data exists
+      if (is.null(dataset$processed_data)) {
+        cat(sprintf("[NAVIGATE] ✗ ERROR: No processed_data in dataset\n"))
+        showNotification(
+          "Dataset has no processed data",
+          type = "error",
+          duration = 5
+        )
+        return()
+      }
+      
+      # Validate: Samples exist
+      if (is.null(dataset$processed_data$samples)) {
+        cat(sprintf("[NAVIGATE] ✗ ERROR: No samples in processed_data\n"))
+        cat(sprintf("[NAVIGATE]   Available fields: %s\n", 
+                    paste(names(dataset$processed_data), collapse=", ")))
+        showNotification(
+          "Invalid processed data structure - no samples found",
+          type = "error",
+          duration = 5
+        )
+        return()
+      }
+      
+      n_samples <- length(dataset$processed_data$samples)
+      cat(sprintf("[NAVIGATE] ✓ Processed data validated\n"))
+      cat(sprintf("[NAVIGATE]   Samples available: %d\n", n_samples))
+      
+      # Set application data for Review Endpoints module
       app_data$processed_data <- dataset$processed_data
       app_data$current_dataset_name <- dataset$file_name
       
-      cat(sprintf("[NAVIGATE] Loaded into app_data: %s\n", dataset$file_name))
+      cat(sprintf("[NAVIGATE] ✓ app_data$processed_data updated\n"))
+      cat(sprintf("[NAVIGATE]   Dataset name: %s\n", app_data$current_dataset_name))
+      cat(sprintf("[NAVIGATE]   Samples: %d\n", 
+                  length(app_data$processed_data$samples)))
       
       # Switch to Review Endpoints tab
-      # Note: The inputId should match the tabset panel ID in the main app UI
-      updateTabsetPanel(
-        session = getDefaultReactiveDomain(),
+      updateNavbarPage(
+        session = session,
         inputId = "main_navbar",
-        selected = "review_endpoints"
+        selected = "Review Endpoints"
       )
       
+      cat(sprintf("[NAVIGATE] ✓ Switched to Review Endpoints tab\n"))
+      cat(sprintf("╚══════════════════════════════════════════════════╝\n\n"))
+      
+      # User notification
       showNotification(
-        sprintf("Loaded %s for review", dataset$file_name),
+        sprintf("Loaded '%s' for review (%d samples)", 
+                dataset$file_name, 
+                n_samples),
         type = "message",
-        duration = 2
+        duration = 3
       )
     }
     
@@ -1062,35 +1241,71 @@ mod_data_overview_server <- function(id, app_data) {
     # =========================================================================
     
     navigate_to_reports <- function(dataset_id) {
-      datasets <- uploaded_datasets()
-      dataset <- datasets[[dataset_id]]
+      cat(sprintf("\n╔══════════════════════════════════════════════════╗\n"))
+      cat(sprintf("║       NAVIGATE TO REPORT BUILDER                ║\n"))
+      cat(sprintf("╚══════════════════════════════════════════════════╝\n"))
+      cat(sprintf("[NAVIGATE] Target dataset ID: %s\n", dataset_id))
       
-      # Validate dataset
-      if (is.null(dataset) || is.null(dataset$processed_data)) {
+      # Get all datasets
+      datasets <- uploaded_datasets()
+      
+      # Validate: Dataset exists
+      if (is.null(datasets[[dataset_id]])) {
+        cat(sprintf("[NAVIGATE] ✗ ERROR: Dataset not found\n"))
         showNotification(
-          "Dataset not found or not processed",
+          "Dataset not found in session",
           type = "error",
           duration = 3
         )
         return()
       }
       
-      # Load into shared app_data for Report Builder module
+      dataset <- datasets[[dataset_id]]
+      cat(sprintf("[NAVIGATE] ✓ Dataset found: %s\n", dataset$file_name))
+      
+      # Validate: Dataset is processed
+      if (!dataset$status %in% c("processed", "loaded")) {
+        cat(sprintf("[NAVIGATE] ✗ ERROR: Dataset not processed\n"))
+        showNotification(
+          sprintf("Dataset '%s' has not been processed yet", dataset$file_name),
+          type = "warning",
+          duration = 3
+        )
+        return()
+      }
+      
+      # Validate: Processed data exists
+      if (is.null(dataset$processed_data)) {
+        cat(sprintf("[NAVIGATE] ✗ ERROR: No processed_data\n"))
+        showNotification(
+          "Dataset has no processed data",
+          type = "error",
+          duration = 3
+        )
+        return()
+      }
+      
+      cat(sprintf("[NAVIGATE] ✓ Processed data validated\n"))
+      
+      # Set application data for Report Builder module
       app_data$processed_data <- dataset$processed_data
       app_data$current_dataset_name <- dataset$file_name
       
-      cat(sprintf("[NAVIGATE] Loaded into app_data for reports: %s\n", dataset$file_name))
+      cat(sprintf("[NAVIGATE] ✓ app_data$processed_data updated\n"))
       
       # Switch to Report Builder tab
-      # Note: The inputId should match the tabset panel ID in the main app UI
-      updateTabsetPanel(
-        session = getDefaultReactiveDomain(),
+      updateNavbarPage(
+        session = session,
         inputId = "main_navbar",
-        selected = "report_builder"
+        selected = "Report Builder"
       )
       
+      cat(sprintf("[NAVIGATE] ✓ Switched to Report Builder tab\n"))
+      cat(sprintf("╚══════════════════════════════════════════════════╝\n\n"))
+      
+      # User notification
       showNotification(
-        sprintf("Loaded %s for report generation", dataset$file_name),
+        sprintf("Loaded '%s' for report generation", dataset$file_name),
         type = "message",
         duration = 2
       )
