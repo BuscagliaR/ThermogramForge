@@ -65,36 +65,62 @@ mod_review_endpoints_server <- function(id, app_data) {
     
     capture_sample_state <- function(sample_id) {
       sample <- app_data$processed_data$samples[[sample_id]]
-      list(
+      
+      captured_state <- list(
+        # Baseline and endpoints
         lower_endpoint = sample$lower_endpoint,
         upper_endpoint = sample$upper_endpoint,
         baseline_subtracted = sample$baseline_subtracted,
+        
+        # Signal detection result - NOW CAPTURED
+        has_signal = if(is.null(sample$has_signal)) TRUE else sample$has_signal,
+        
+        # Adjustment tracking
         manual_adjustment = if(is.null(sample$manual_adjustment)) FALSE else sample$manual_adjustment,
         lower_manual = if(is.null(sample$lower_manual)) FALSE else sample$lower_manual,
         upper_manual = if(is.null(sample$upper_manual)) FALSE else sample$upper_manual,
+        
+        # Review tracking
         reviewed = if(is.null(sample$reviewed)) FALSE else sample$reviewed,
         excluded = if(is.null(sample$excluded)) FALSE else sample$excluded,
+        
+        # Auto endpoints (for discard functionality)
         lower_endpoint_auto = sample$lower_endpoint_auto,
         upper_endpoint_auto = sample$upper_endpoint_auto
       )
+      
+      cat(sprintf("[STATE] Captured state for %s (signal=%s, baseline_points=%d)\n",
+                  sample_id,
+                  captured_state$has_signal,
+                  length(captured_state$baseline_subtracted)))
+      
+      return(captured_state)
     }
     
     restore_sample_state <- function(sample_id, state) {
+      cat(sprintf("[STATE] Restoring state for %s (signal=%s)\n", sample_id, state$has_signal))
+      
       app_data$processed_data$samples[[sample_id]]$lower_endpoint <- state$lower_endpoint
       app_data$processed_data$samples[[sample_id]]$upper_endpoint <- state$upper_endpoint
       app_data$processed_data$samples[[sample_id]]$baseline_subtracted <- state$baseline_subtracted
+      
+      # FIXED: Now restore signal as well
+      app_data$processed_data$samples[[sample_id]]$has_signal <- state$has_signal
+      
       app_data$processed_data$samples[[sample_id]]$manual_adjustment <- state$manual_adjustment
       app_data$processed_data$samples[[sample_id]]$lower_manual <- state$lower_manual
       app_data$processed_data$samples[[sample_id]]$upper_manual <- state$upper_manual
       app_data$processed_data$samples[[sample_id]]$reviewed <- state$reviewed
       app_data$processed_data$samples[[sample_id]]$excluded <- state$excluded
+      
       if (!is.null(state$lower_endpoint_auto)) {
         app_data$processed_data$samples[[sample_id]]$lower_endpoint_auto <- state$lower_endpoint_auto
       }
       if (!is.null(state$upper_endpoint_auto)) {
         app_data$processed_data$samples[[sample_id]]$upper_endpoint_auto <- state$upper_endpoint_auto
       }
-      cat(sprintf("[RESTORE] Restored state for sample %s\n", sample_id))
+      
+      cat(sprintf("[STATE] ✓ Restored state for %s\n", sample_id))
     }
     
     can_undo <- reactive({
@@ -107,8 +133,12 @@ mod_review_endpoints_server <- function(id, app_data) {
     
     reprocess_with_manual_endpoints <- function(temperature, dcp, lower_endpoint, upper_endpoint) {
       tryCatch({
+        # ---------------------------------------------------------------
+        # Step 1: Validate data
+        # ---------------------------------------------------------------
         valid_idx <- !is.na(temperature) & !is.na(dcp)
         if (sum(valid_idx) < 10) {
+          cat("[REPROCESS] ERROR: Insufficient data points\n")
           return(list(success = FALSE, message = "Insufficient data points"))
         }
         
@@ -117,6 +147,12 @@ mod_review_endpoints_server <- function(id, app_data) {
           dCp = dcp[valid_idx]
         )
         
+        # ---------------------------------------------------------------
+        # Step 2: Recalculate baseline with new endpoints
+        # ---------------------------------------------------------------
+        cat(sprintf("[REPROCESS] Recalculating baseline with endpoints: lower=%.1f, upper=%.1f\n", 
+                    lower_endpoint, upper_endpoint))
+        
         baseline_result <- ThermogramBaseline::baseline.subtraction.byhand(
           x = input_data,
           lwr.temp = lower_endpoint,
@@ -124,20 +160,70 @@ mod_review_endpoints_server <- function(id, app_data) {
           plot.on = FALSE
         )
         
+        if (is.null(baseline_result)) {
+          cat("[REPROCESS] ERROR: Baseline subtraction failed\n")
+          return(list(success = FALSE, message = "Baseline subtraction failed"))
+        }
+        
+        # ---------------------------------------------------------------
+        # Step 3: Interpolate to standard grid
+        # ---------------------------------------------------------------
         final_result <- ThermogramBaseline::final.sample.interpolate(
           x = baseline_result,
           grid.temp = seq(45, 90, 0.1),
           plot.on = FALSE
         )
         
-        list(
+        if (is.null(final_result)) {
+          cat("[REPROCESS] ERROR: Interpolation failed\n")
+          return(list(success = FALSE, message = "Interpolation failed"))
+        }
+        
+        # ---------------------------------------------------------------
+        # Step 4: RE-EVALUATE SIGNAL with new baseline-subtracted data
+        # ---------------------------------------------------------------
+        # Create the processed data frame with new baseline-subtracted values
+        processed_data <- data.frame(
+          Temperature = final_result$Temperature,
+          dCp = final_result$dCp,
+          stringsAsFactors = FALSE
+        )
+        
+        cat("[REPROCESS] Running signal detection on updated baseline-subtracted data...\n")
+        
+        signal_result <- tryCatch({
+          ThermogramBaseline::signal.detection(processed_data)
+        }, error = function(e) {
+          cat(sprintf("[REPROCESS] WARNING: Signal detection failed: %s\n", e$message))
+          # Return a safe default if signal detection fails
+          list(has_signal = TRUE)  # Assume signal if detection fails
+        })
+        
+        # Extract signal detection result safely
+        has_signal <- if (!is.null(signal_result$has_signal)) {
+          signal_result$has_signal
+        } else {
+          TRUE  # Default to TRUE if not found
+        }
+        
+        cat(sprintf("[REPROCESS] Signal detection result: has_signal=%s\n", has_signal))
+        
+        # ---------------------------------------------------------------
+        # Step 5: Return complete result with signal
+        # ---------------------------------------------------------------
+        result <- list(
           success = TRUE,
           lower_endpoint = lower_endpoint,
           upper_endpoint = upper_endpoint,
-          baseline_subtracted = final_result$dCp
+          baseline_subtracted = final_result$dCp,
+          has_signal = has_signal  # NEW: Include signal in result
         )
+        
+        cat(sprintf("[REPROCESS] ✓ Reprocessing complete (signal=%s)\n", has_signal))
+        return(result)
+        
       }, error = function(e) {
-        cat(sprintf("[ERROR] Reprocessing failed: %s\n", e$message))
+        cat(sprintf("[REPROCESS] ERROR: Unexpected error during reprocessing: %s\n", e$message))
         list(success = FALSE, message = e$message)
       })
     }
@@ -839,6 +925,11 @@ mod_review_endpoints_server <- function(id, app_data) {
           app_data$processed_data$samples[[selected_sample()]]$baseline_subtracted <- result$baseline_subtracted
           app_data$processed_data$samples[[selected_sample()]]$manual_adjustment <- TRUE
           
+          if (!is.null(result$has_signal)) {
+            app_data$processed_data$samples[[selected_sample()]]$has_signal <- result$has_signal
+            cat(sprintf("[ADJUST] Updated signal for sample: has_signal=%s\n", result$has_signal))
+          }
+          
           if (mode == "lower") {
             app_data$processed_data$samples[[selected_sample()]]$lower_manual <- TRUE
           } else {
@@ -1031,8 +1122,6 @@ mod_review_endpoints_server <- function(id, app_data) {
                   class = "btn btn-sm btn-outline-secondary flex-shrink-0",
                   style = "padding: 0.35rem 0.75rem; font-size: 0.85rem; border-color: #2ca02c; color: #2ca02c;",
                   disabled = !is.null(adjustment_mode()),
-                  `data-bs-toggle` = "tooltip",
-                  `data-bs-placement` = "top",
                   title = "Click to manually adjust lower endpoint"
                 )
               )
@@ -1067,8 +1156,6 @@ mod_review_endpoints_server <- function(id, app_data) {
                   class = "btn btn-sm btn-outline-secondary flex-shrink-0",
                   style = "padding: 0.35rem 0.75rem; font-size: 0.85rem; border-color: #9467bd; color: #9467bd;",
                   disabled = !is.null(adjustment_mode()),
-                  `data-bs-toggle` = "tooltip",
-                  `data-bs-placement` = "top",
                   title = "Click to manually adjust upper endpoint"
                 )
               )
@@ -1110,8 +1197,6 @@ mod_review_endpoints_server <- function(id, app_data) {
               ns("prev_sample"), 
               icon("arrow-left"), 
               class = "btn btn-outline-secondary",
-              `data-bs-toggle` = "tooltip",
-              `data-bs-placement` = "top",
               title = "Previous sample"
             ),
             
@@ -1119,8 +1204,6 @@ mod_review_endpoints_server <- function(id, app_data) {
               ns("next_sample"), 
               icon("arrow-right"), 
               class = "btn btn-outline-secondary",
-              `data-bs-toggle` = "tooltip",
-              `data-bs-placement` = "top",
               title = "Next sample"
             )
           ),
@@ -1134,8 +1217,6 @@ mod_review_endpoints_server <- function(id, app_data) {
               ns("undo_btn"),
               icon("undo"),
               class = if (can_undo()) "btn btn-outline-secondary" else "btn btn-outline-secondary disabled",
-              `data-bs-toggle` = "tooltip",
-              `data-bs-placement` = "top",
               title = "Undo last change"
             ),
             
@@ -1143,8 +1224,6 @@ mod_review_endpoints_server <- function(id, app_data) {
               ns("redo_btn"),
               icon("redo"),
               class = if (can_redo()) "btn btn-outline-secondary" else "btn btn-outline-secondary disabled",
-              `data-bs-toggle` = "tooltip",
-              `data-bs-placement` = "top",
               title = "Redo last change"
             )
           )
@@ -1397,6 +1476,13 @@ mod_review_endpoints_server <- function(id, app_data) {
             app_data$processed_data$samples[[sample_id]]$lower_endpoint <- result$lower_endpoint
             app_data$processed_data$samples[[sample_id]]$upper_endpoint <- result$upper_endpoint
             app_data$processed_data$samples[[sample_id]]$baseline_subtracted <- result$baseline_subtracted
+            
+            # If we're reverting to auto endpoints, re-evaluate signal
+            if (!is.null(result$has_signal)) {
+              app_data$processed_data$samples[[sample_id]]$has_signal <- result$has_signal
+              cat(sprintf("[DISCARD] Restored signal for sample: has_signal=%s\n", result$has_signal))
+            }
+            
             app_data$processed_data$samples[[sample_id]]$manual_adjustment <- FALSE
             app_data$processed_data$samples[[sample_id]]$lower_manual <- FALSE
             app_data$processed_data$samples[[sample_id]]$upper_manual <- FALSE
