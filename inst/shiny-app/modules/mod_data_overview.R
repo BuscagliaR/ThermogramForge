@@ -916,10 +916,10 @@ mod_data_overview_server <- function(id, app_data) {
     
     output$processed_files_ui <- renderUI({
       
-      # CRITICAL: Force dependency on ui_refresh_trigger
+      # Force dependency on ui_refresh_trigger
       trigger_count <- ui_refresh_trigger()
       
-      # CRITICAL: Depend on uploaded_datasets WITHOUT isolate
+      # Depend on uploaded_datasets WITHOUT isolate
       datasets <- uploaded_datasets()
       
       # DEBUG: Log that renderUI was triggered
@@ -977,29 +977,63 @@ mod_data_overview_server <- function(id, app_data) {
         
         cat(sprintf("[PROCESSED_UI]   Building row for: %s\n", dataset$id))
         
-        # Action buttons for this dataset
-        button_set <- div(
-          class = "btn-group-sm",
-          role = "group",
-          actionButton(
-            ns(paste0("review_", dataset$id)),
-            "Review Endpoints",
-            icon = icon("chart-line"),
-            class = "btn-primary btn-sm me-1"
-          ),
-          actionButton(
-            ns(paste0("save_", dataset$id)),
-            "Save to Disk",
-            icon = icon("save"),
-            class = "btn-success btn-sm me-1"
-          ),
-          actionButton(
-            ns(paste0("report_", dataset$id)),
-            "Create Report",
-            icon = icon("file-alt"),
-            class = "btn-info btn-sm"
+        # Action buttons for this dataset - CONDITIONAL BASED ON STATUS
+        if (dataset$status == "processed") {
+          # PROCESSED datasets: All 3 buttons available
+          cat(sprintf("[PROCESSED_UI]     Status is PROCESSED - showing all 3 buttons\n"))
+          
+          button_set <- div(
+            class = "btn-group-sm",
+            role = "group",
+            actionButton(
+              ns(paste0("review_", dataset$id)),
+              "Review Endpoints",
+              icon = icon("chart-line"),
+              class = "btn-primary btn-sm me-1",
+              title = "Manually review and adjust baseline endpoints"
+            ),
+            actionButton(
+              ns(paste0("save_", dataset$id)),
+              "Save to Disk",
+              icon = icon("save"),
+              class = "btn-success btn-sm me-1",
+              title = "Save processed data to local disk"
+            ),
+            actionButton(
+              ns(paste0("report_", dataset$id)),
+              "Create Report",
+              icon = icon("file-alt"),
+              class = "btn-info btn-sm",
+              title = "Generate metrics report"
+            )
           )
-        )
+          
+        } else if (dataset$status == "loaded") {
+          # LOADED datasets: Only "Create Report" button
+          # (CSV/Excel files - read-only, cannot be reviewed or re-saved)
+          cat(sprintf("[PROCESSED_UI]     Status is LOADED - showing only Create Report button\n"))
+          
+          button_set <- div(
+            class = "btn-group-sm",
+            role = "group",
+            actionButton(
+              ns(paste0("report_", dataset$id)),
+              "Create Report",
+              icon = icon("file-alt"),
+              class = "btn-info btn-sm",
+              title = "Generate metrics report"
+            )
+          )
+          
+        } else {
+          # Fallback for unknown status (defensive coding)
+          cat(sprintf("[PROCESSED_UI]     ⚠ Unknown status: %s - showing no buttons\n", 
+                      dataset$status))
+          button_set <- div(
+            class = "btn-group-sm",
+            tags$small(class = "text-muted", "Unknown status")
+          )
+        }
         
         # Determine badge based on status
         status_badge <- if (dataset$status == "loaded") {
@@ -1220,7 +1254,7 @@ mod_data_overview_server <- function(id, app_data) {
       updateNavbarPage(
         session = session,
         inputId = "main_navbar",
-        selected = "Review Endpoints"
+        selected = "review_endpoints"
       )
       
       cat(sprintf("[NAVIGATE] ✓ Switched to Review Endpoints tab\n"))
@@ -1297,7 +1331,7 @@ mod_data_overview_server <- function(id, app_data) {
       updateNavbarPage(
         session = session,
         inputId = "main_navbar",
-        selected = "Report Builder"
+        selected = "report_builder"
       )
       
       cat(sprintf("[NAVIGATE] ✓ Switched to Report Builder tab\n"))
