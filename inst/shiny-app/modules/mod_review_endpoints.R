@@ -884,7 +884,7 @@ mod_review_endpoints_server <- function(id, app_data) {
     })
     
     # =========================================================================
-    # REVIEW CONTROLS WITH VERTICAL DIVIDER
+    # REVIEW CONTROLS
     # =========================================================================
     
     output$review_controls <- renderUI({
@@ -893,6 +893,9 @@ mod_review_endpoints_server <- function(id, app_data) {
       
       sample <- app_data$processed_data$samples[[selected_sample()]]
       
+      # -----------------------------------------------------------------------
+      # Setup reactive values and flags
+      # -----------------------------------------------------------------------
       reviewed_value <- if(is.null(sample$reviewed)) FALSE else sample$reviewed
       excluded_value <- if(is.null(sample$excluded)) FALSE else sample$excluded
       
@@ -904,127 +907,245 @@ mod_review_endpoints_server <- function(id, app_data) {
       lower_manual <- if(is.null(sample$lower_manual)) FALSE else sample$lower_manual
       upper_manual <- if(is.null(sample$upper_manual)) FALSE else sample$upper_manual
       
+      # -----------------------------------------------------------------------
+      # Create status badges (Auto vs Manual)
+      # -----------------------------------------------------------------------
       lower_badge <- if (lower_manual) {
-        span(icon("hand-pointer"), " Manual", class = "badge bg-warning text-dark ms-1", style = "font-size: 0.75rem;")
+        span(
+          icon("hand-pointer"), 
+          " Manual", 
+          class = "badge bg-warning text-dark", 
+          style = "font-size: 0.7rem; padding: 0.35rem 0.5rem;"
+        )
       } else {
-        span(icon("robot"), " Auto", class = "badge bg-primary ms-1", style = "font-size: 0.75rem;")
+        span(
+          icon("robot"), 
+          " Auto", 
+          class = "badge bg-info", 
+          style = "font-size: 0.7rem; padding: 0.35rem 0.5rem;"
+        )
       }
       
       upper_badge <- if (upper_manual) {
-        span(icon("hand-pointer"), " Manual", class = "badge bg-warning text-dark ms-1", style = "font-size: 0.75rem;")
+        span(
+          icon("hand-pointer"), 
+          " Manual", 
+          class = "badge bg-warning text-dark", 
+          style = "font-size: 0.7rem; padding: 0.35rem 0.5rem;"
+        )
       } else {
-        span(icon("robot"), " Auto", class = "badge bg-primary ms-1", style = "font-size: 0.75rem;")
+        span(
+          icon("robot"), 
+          " Auto", 
+          class = "badge bg-info", 
+          style = "font-size: 0.7rem; padding: 0.35rem 0.5rem;"
+        )
       }
       
-      # FIXED: Added vertical divider and improved layout
+      # -----------------------------------------------------------------------
+      # Build main UI structure
+      # -----------------------------------------------------------------------
       tagList(
-        # Header row
+        # =================================================================
+        # SECTION 1: Sample Header - Enhanced Visual Design
+        # =================================================================
         div(
-          class = "row mb-2",
+          class = "p-3 border-bottom",
+          style = "background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); border-radius: 0.25rem 0.25rem 0 0; border-top: 4px solid #0d6efd;",
+          
+          # Header row with sample info and status badges
           div(
-            class = "col-6",
-            strong("ID: ", style = "font-size: 1rem;"),
-            span(selected_sample(), style = "font-size: 1rem;")
-          ),
-          div(
-            class = "col-6 d-flex justify-content-end gap-2",
+            class = "d-flex justify-content-between align-items-center mb-2",
+            
+            # Left: Sample ID section with icon
             div(
-              class = "form-check form-check-inline mb-0",
-              checkboxInput(
-                ns("mark_reviewed"),
-                label = span("Reviewed", style = "font-size: 0.85rem;"),
-                value = reviewed_value
+              class = "d-flex align-items-center gap-2",
+              div(
+                div(
+                  span("Sample ID", class = "d-block text-muted small fw-semibold", style = "letter-spacing: 0.5px;"),
+                  span(selected_sample(), class = "d-block fs-5 fw-bold text-dark", style = "font-family: monospace; letter-spacing: 1px; margin-top: 0.25rem;")
+                )
               )
             ),
+            
+            # Right: Status badges with toggle buttons
             div(
-              class = "form-check form-check-inline mb-0",
-              checkboxInput(
-                ns("mark_excluded"),
-                label = span("Exclude", style = "font-size: 0.85rem;"),
-                value = excluded_value
+              class = "d-flex gap-2",
+              
+              # Reviewed toggle button
+              actionButton(
+                ns("reviewed_toggle"),
+                span(icon("check-circle"), " Reviewed"),
+                class = if(reviewed_value) "btn btn-sm btn-info" else "btn btn-sm btn-outline-secondary",
+                style = "padding: 0.4rem 0.75rem; font-size: 0.9rem; min-width: 110px; transition: all 0.15s ease-in-out;",
+                title = "Toggle reviewed status"
+              ),
+              
+              # Exclude toggle button
+              actionButton(
+                ns("excluded_toggle"),
+                span(icon("ban"), " Exclude"),
+                class = if(excluded_value) "btn btn-sm btn-danger" else "btn btn-sm btn-outline-secondary",
+                style = "padding: 0.4rem 0.75rem; font-size: 0.9rem; min-width: 110px; transition: all 0.15s ease-in-out;",
+                title = "Toggle exclusion status"
               )
             )
           )
         ),
         
-        hr(style = "margin: 0.5rem 0;"),
-        
-        # Endpoints with vertical divider
+        # =================================================================
+        # SECTION 2: Endpoints Control Panel
+        # =================================================================
         div(
-          class = "row mb-1",
+          class = "p-3 border-bottom",
+          style = "background-color: #f8f9fa;",
+          
+          # Lower endpoint
           div(
-            class = "col-6",
+            class = "row g-2 mb-3",
             div(
-              class = "d-flex justify-content-between align-items-center",
+              class = "col-md-6",
               div(
-                span("Lower Endpoint: ", style = "font-weight: 500; font-size: 0.85rem;"),
-                span(sprintf("%.1f°C", sample$lower_endpoint), style = "font-size: 0.85rem;"),
-                lower_badge
-              ),
-              actionButton(
-                ns("adjust_lower"),
-                span("Manually Adjust ", icon("pencil")),
-                class = "btn btn-sm btn-outline-primary",
-                style = "padding: 0.15rem 0.5rem; font-size: 0.75rem;",
-                disabled = !is.null(adjustment_mode())
+                class = "d-flex align-items-center justify-content-between p-2",
+                style = "background-color: white; border-radius: 0.25rem; border-left: 4px solid #2ca02c;",
+                
+                # Left side: Label and value
+                div(
+                  class = "flex-grow-1",
+                  div(
+                    span("Lower Endpoint", class = "d-block text-muted small fw-semibold"),
+                    div(
+                      class = "d-flex align-items-center gap-2 mt-1",
+                      span(sprintf("%.2f°C", sample$lower_endpoint), 
+                           class = "fs-5 fw-bold",
+                           style = "color: #2ca02c;"),
+                      lower_badge
+                    )
+                  )
+                ),
+                
+                # Right side: Action button
+                actionButton(
+                  ns("adjust_lower"),
+                  span(icon("pencil-alt"), " Adjust"),
+                  class = "btn btn-sm btn-outline-secondary flex-shrink-0",
+                  style = "padding: 0.35rem 0.75rem; font-size: 0.85rem; border-color: #2ca02c; color: #2ca02c;",
+                  disabled = !is.null(adjustment_mode()),
+                  `data-bs-toggle` = "tooltip",
+                  `data-bs-placement` = "top",
+                  title = "Click to manually adjust lower endpoint"
+                )
+              )
+            ),
+            
+            # Upper endpoint
+            div(
+              class = "col-md-6",
+              div(
+                class = "d-flex align-items-center justify-content-between p-2",
+                style = "background-color: white; border-radius: 0.25rem; border-left: 4px solid #9467bd;",
+                
+                # Left side: Label and value
+                div(
+                  class = "flex-grow-1",
+                  div(
+                    span("Upper Endpoint", class = "d-block text-muted small fw-semibold"),
+                    div(
+                      class = "d-flex align-items-center gap-2 mt-1",
+                      span(sprintf("%.2f°C", sample$upper_endpoint), 
+                           class = "fs-5 fw-bold",
+                           style = "color: #9467bd;"),
+                      upper_badge
+                    )
+                  )
+                ),
+                
+                # Right side: Action button
+                actionButton(
+                  ns("adjust_upper"),
+                  span(icon("pencil-alt"), " Adjust"),
+                  class = "btn btn-sm btn-outline-secondary flex-shrink-0",
+                  style = "padding: 0.35rem 0.75rem; font-size: 0.85rem; border-color: #9467bd; color: #9467bd;",
+                  disabled = !is.null(adjustment_mode()),
+                  `data-bs-toggle` = "tooltip",
+                  `data-bs-placement` = "top",
+                  title = "Click to manually adjust upper endpoint"
+                )
               )
             )
           ),
-          # FIXED: Vertical divider
-          div(
-            class = "col-6",
-            style = "border-left: 3px solid #dee2e6; padding-left: 0.75rem;",
+          
+          # Discard changes button (conditional)
+          if (lower_manual || upper_manual) {
             div(
-              class = "d-flex justify-content-between align-items-center",
-              div(
-                span("Upper Endpoint: ", style = "font-weight: 500; font-size: 0.85rem;"),
-                span(sprintf("%.1f°C", sample$upper_endpoint), style = "font-size: 0.85rem;"),
-                upper_badge
-              ),
+              class = "alert alert-warning d-flex align-items-center gap-2 mb-0",
+              style = "padding: 0.5rem 0.75rem;",
+              
+              icon("exclamation-triangle"),
+              
               actionButton(
-                ns("adjust_upper"),
-                span("Manually Adjust ", icon("pencil")),
-                class = "btn btn-sm btn-outline-primary",
-                style = "padding: 0.15rem 0.5rem; font-size: 0.75rem;",
-                disabled = !is.null(adjustment_mode())
+                ns("discard_changes"),
+                "Discard Manual Changes",
+                icon = icon("undo"),
+                class = "btn btn-sm btn-outline-warning ms-auto",
+                style = "padding: 0.25rem 0.5rem; font-size: 0.8rem;"
               )
             )
-          )
+          }
         ),
         
-        if (lower_manual || upper_manual) {
+        # =================================================================
+        # SECTION 3: Navigation & History Controls
+        # =================================================================
+        div(
+          class = "d-flex justify-content-between align-items-center p-2",
+          style = "background-color: #ffffff; border-radius: 0 0 0.25rem 0.25rem;",
+          
+          # Navigation arrows
           div(
-            class = "mb-2 mt-2",
+            class = "btn-group btn-group-sm",
+            role = "group",
+            
             actionButton(
-              ns("discard_changes"),
-              "Discard Manual Changes",
-              icon = icon("undo"),
-              class = "btn btn-sm btn-outline-warning w-100",
-              style = "font-size: 0.85rem;"
+              ns("prev_sample"), 
+              icon("arrow-left"), 
+              class = "btn btn-outline-secondary",
+              `data-bs-toggle` = "tooltip",
+              `data-bs-placement` = "top",
+              title = "Previous sample"
+            ),
+            
+            actionButton(
+              ns("next_sample"), 
+              icon("arrow-right"), 
+              class = "btn btn-outline-secondary",
+              `data-bs-toggle` = "tooltip",
+              `data-bs-placement` = "top",
+              title = "Next sample"
             )
-          )
-        },
-        
-        hr(style = "margin: 0.5rem 0;"),
-        
-        div(
-          class = "d-flex justify-content-between",
-          div(
-            class = "btn-group btn-group-sm",
-            actionButton(ns("prev_sample"), icon("arrow-left"), class = "btn btn-secondary"),
-            actionButton(ns("next_sample"), icon("arrow-right"), class = "btn btn-secondary")
           ),
+          
+          # Undo/Redo controls
           div(
             class = "btn-group btn-group-sm",
+            role = "group",
+            
             actionButton(
               ns("undo_btn"),
               icon("undo"),
-              class = if (can_undo()) "btn btn-outline-secondary" else "btn btn-outline-secondary disabled"
+              class = if (can_undo()) "btn btn-outline-secondary" else "btn btn-outline-secondary disabled",
+              `data-bs-toggle` = "tooltip",
+              `data-bs-placement` = "top",
+              title = "Undo last change"
             ),
+            
             actionButton(
               ns("redo_btn"),
               icon("redo"),
-              class = if (can_redo()) "btn btn-outline-secondary" else "btn btn-outline-secondary disabled"
+              class = if (can_redo()) "btn btn-outline-secondary" else "btn btn-outline-secondary disabled",
+              `data-bs-toggle` = "tooltip",
+              `data-bs-placement` = "top",
+              title = "Redo last change"
             )
           )
         )
@@ -1032,36 +1153,30 @@ mod_review_endpoints_server <- function(id, app_data) {
     })
     
     # =========================================================================
-    # CHECKBOX HANDLERS
+    # TOGGLE BUTTON HANDLERS
     # =========================================================================
     
-    observeEvent(input$mark_reviewed, {
+    observeEvent(input$reviewed_toggle, {
       req(selected_sample())
-      req(!is.null(input$mark_reviewed))
       
       if (isolate(updating_checkboxes())) {
-        cat("[CHECKBOX] Blocked - UI is updating\n")
+        cat("[BUTTON] Blocked - UI is updating\n")
         return()
       }
       
       current_sample_id <- isolate(selected_sample())
       
       if (isolate(programmatic_selection())) {
-        cat(sprintf("[CHECKBOX] Ignoring mark_reviewed - programmatic for %s\n", current_sample_id))
+        cat(sprintf("[BUTTON] Ignoring reviewed_toggle - programmatic for %s\n", current_sample_id))
         return()
       }
       
-      new_value <- input$mark_reviewed
+      # Toggle the value
+      current_value <- isolate(last_reviewed_value())
+      new_value <- !current_value
       
-      last_value <- isolate(last_reviewed_value())
-      if (!is.null(last_value) && last_value == new_value) {
-        cat(sprintf("[CHECKBOX] Ignoring mark_reviewed - unchanged (sample=%s, value=%s)\n",
-                    current_sample_id, new_value))
-        return()
-      }
-      
-      cat(sprintf("[CHECKBOX] Processing mark_reviewed: sample=%s, old=%s, new=%s\n",
-                  current_sample_id, last_value, new_value))
+      cat(sprintf("[BUTTON] Processing reviewed_toggle: sample=%s, old=%s, new=%s\n",
+                  current_sample_id, current_value, new_value))
       
       previous_state <- capture_sample_state(current_sample_id)
       
@@ -1108,33 +1223,30 @@ mod_review_endpoints_server <- function(id, app_data) {
       
     }, priority = 10, ignoreInit = TRUE)
     
-    observeEvent(input$mark_excluded, {
+    # =========================================================================
+    # EXCLUDED TOGGLE BUTTON HANDLER
+    # =========================================================================
+    observeEvent(input$excluded_toggle, {
       req(selected_sample())
-      req(!is.null(input$mark_excluded))
       
       if (isolate(updating_checkboxes())) {
-        cat("[CHECKBOX] Blocked - UI is updating\n")
+        cat("[BUTTON] Blocked - UI is updating\n")
         return()
       }
       
       current_sample_id <- isolate(selected_sample())
       
       if (isolate(programmatic_selection())) {
-        cat(sprintf("[CHECKBOX] Ignoring mark_excluded - programmatic for %s\n", current_sample_id))
+        cat(sprintf("[BUTTON] Ignoring excluded_toggle - programmatic for %s\n", current_sample_id))
         return()
       }
       
-      new_value <- input$mark_excluded
+      # Toggle the value
+      current_value <- isolate(last_excluded_value())
+      new_value <- !current_value
       
-      last_value <- isolate(last_excluded_value())
-      if (!is.null(last_value) && last_value == new_value) {
-        cat(sprintf("[CHECKBOX] Ignoring mark_excluded - unchanged (sample=%s, value=%s)\n",
-                    current_sample_id, new_value))
-        return()
-      }
-      
-      cat(sprintf("[CHECKBOX] Processing mark_excluded: sample=%s, old=%s, new=%s\n",
-                  current_sample_id, last_value, new_value))
+      cat(sprintf("[BUTTON] Processing excluded_toggle: sample=%s, old=%s, new=%s\n",
+                  current_sample_id, current_value, new_value))
       
       previous_state <- capture_sample_state(current_sample_id)
       
