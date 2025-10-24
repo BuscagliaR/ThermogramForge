@@ -1282,11 +1282,7 @@ mod_data_overview_server <- function(id, app_data) {
                   length(app_data$processed_data$samples)))
       
       # Switch to Review Endpoints tab
-      updateNavbarPage(
-        session = session,
-        inputId = "main_navbar",
-        selected = "review_endpoints"
-      )
+      app_data$navigate_to <- "review_endpoints"
       
       cat(sprintf("[NAVIGATE] ✓ Switched to Review Endpoints tab\n"))
       cat(sprintf("╚══════════════════════════════════════════════════╝\n\n"))
@@ -1358,11 +1354,7 @@ mod_data_overview_server <- function(id, app_data) {
       
       cat(sprintf("[NAVIGATE] ✓ app_data$processed_data updated\n"))
       
-      updateNavbarPage(
-        session = session,
-        inputId = "main_navbar",
-        selected = "Report Builder"
-      )
+      app_data$navigate_to <- "report_builder"
       
       cat(sprintf("[NAVIGATE] ✓ Switched to Report Builder tab\n"))
       cat(sprintf("╚══════════════════════════════════════════════════╝\n\n"))
@@ -1764,8 +1756,6 @@ mod_data_overview_server <- function(id, app_data) {
             duration = 2
           )
           
-          # Switch to Review Endpoints tab
-          updateNavbarPage(session, "main_navbar", selected = "review_endpoints")
           
         } else if (data_type == "report_only") {
           # CSV/Excel data - for reports only
