@@ -1423,10 +1423,9 @@ mod_data_overview_server <- function(id, app_data) {
       
       # Call save utility function
       result <- save_processed_data(
-        processed_data = dataset$processed_data,
-        dataset_name = input$save_filename,
-        format = input$save_format,
-        original_filename = dataset$file_name
+        data = dataset$processed_data,     
+        filename = input$save_filename, 
+        format = input$save_format
       )
       
       # Handle result
@@ -1614,76 +1613,154 @@ mod_data_overview_server <- function(id, app_data) {
       
       filepath <- session$userData$load_filepath
       filename <- session$userData$load_filename
-      load_format <- session$userData$load_format
       
-      cat(sprintf("[LOAD] Loading from disk: %s\n", filepath))
+      cat(sprintf("\n[LOAD] Loading from disk: %s\n", filepath))
+      cat(sprintf("[LOAD] Loading file: %s\n", filename))
       
-      # Call load utility function
-      result <- load_processed_data(filepath)
-      
-      # Handle errors
-      if (!result$success) {
+      tryCatch({
+        # Load the file
+        loaded <- load_processed_data(filepath)
+        
+        # Validate loaded data
+        if (is.null(loaded) || !is.list(loaded)) {
+          showNotification(
+            "Failed to load file: Invalid format",
+            type = "error",
+            duration = 3
+          )
+          removeModal()
+          return()
+        }
+        
+        # Extract data and type
+        data <- loaded$data
+        data_type <- loaded$data_type  # "full" or "report_only"
+        
+        # =========================================================================
+        # FIXED: Generate unique dataset ID for the loaded file
+        # =========================================================================
+        
+        # Use same ID generation as uploaded datasets for consistency
+        # Format: LOADED_filename_timestamp
+        base_name <- tools::file_path_sans_ext(filename)
+        timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+        dataset_id <- sprintf("LOADED_%s_%s", base_name, timestamp)
+        
+        # Check for collision (extremely unlikely but defensive)
+        counter <- 1
+        original_id <- dataset_id
+        datasets <- uploaded_datasets()
+        while (dataset_id %in% names(datasets)) {
+          counter <- counter + 1
+          dataset_id <- sprintf("%s_%d", original_id, counter)
+        }
+        
+        cat(sprintf("[LOAD] Generated dataset ID: %s\n", dataset_id))
+        
+        # =========================================================================
+        # FIXED: Create dataset entry with all required fields
+        # =========================================================================
+        
+        if (data_type == "full") {
+          # Full RDS data - can populate Review Endpoints
+          cat(sprintf("[LOAD] Loaded full dataset: %d samples\n", length(data$samples)))
+          
+          # Create dataset entry structure
+          loaded_dataset <- list(
+            id = dataset_id,
+            file_name = filename,
+            data = NULL,  # Not used for loaded full data
+            format_info = list(
+              data_format = "rds",
+              n_samples = length(data$samples),
+              n_rows = sum(sapply(data$samples, function(s) length(s$temperature)))
+            ),
+            upload_time = Sys.time(),
+            status = "loaded",
+            processed_data = data,  # Full processed data from RDS
+            temp_params = list()
+          )
+          
+          # Add to uploaded_datasets reactive
+          datasets[[dataset_id]] <- loaded_dataset
+          uploaded_datasets(datasets)
+          
+          cat(sprintf("[LOAD] ✓ Added to uploaded_datasets with ID: %s\n", dataset_id))
+          
+          # Also set as current processed data for Review Endpoints
+          app_data$processed_data <- data
+          
+          showNotification(
+            HTML(sprintf(
+              "<strong>Loaded %s</strong><br/>%d samples ready for review",
+              filename,
+              length(data$samples)
+            )),
+            type = "message",
+            duration = 2
+          )
+          
+          # Switch to Review Endpoints tab
+          updateNavbarPage(session, "main_navbar", selected = "review_endpoints")
+          
+        } else if (data_type == "report_only") {
+          # CSV/Excel data - for reports only
+          cat(sprintf("[LOAD] Loaded report-only dataset: %d samples\n", nrow(data)))
+          
+          # Create dataset entry structure for report data
+          loaded_dataset <- list(
+            id = dataset_id,
+            file_name = filename,
+            data = data,  # Store the wide-format metrics data
+            format_info = list(
+              data_format = tolower(tools::file_ext(filename)),
+              n_samples = nrow(data),
+              n_columns = ncol(data),
+              load_type = "report_only"
+            ),
+            upload_time = Sys.time(),
+            status = "loaded",
+            processed_data = NULL,  # Not applicable for report-only data
+            temp_params = list()
+          )
+          
+          # Add to uploaded_datasets reactive
+          datasets[[dataset_id]] <- loaded_dataset
+          uploaded_datasets(datasets)
+          
+          cat(sprintf("[LOAD] ✓ Added to uploaded_datasets with ID: %s\n", dataset_id))
+          
+          # Also store in app_data for potential report generation
+          app_data$report_data <- data
+          
+          showNotification(
+            HTML(sprintf(
+              "<strong>Loaded %s</strong><br/>This file contains metrics only. Navigate to Report Builder to create reports.",
+              filename
+            )),
+            type = "warning",
+            duration = 3
+          )
+          
+          # Stay on Data Overview tab (don't switch tabs)
+        }
+        
+        # Trigger UI refresh to show newly added dataset
+        ui_refresh_trigger(ui_refresh_trigger() + 1)
+        
+        # Also refresh saved files list
+        saved_files_trigger(saved_files_trigger() + 1)
+        
+      }, error = function(e) {
+        cat(sprintf("[LOAD] ERROR: %s\n", e$message))
         showNotification(
-          sprintf("Load failed: %s", result$message),
+          sprintf("Load failed: %s", e$message),
           type = "error",
           duration = 3
         )
-        removeModal()
-        return()
-      }
-      
-      # Generate unique ID for loaded dataset
-      new_counter <- dataset_counter() + 1
-      dataset_counter(new_counter)
-      dataset_id <- sprintf("dataset_%d", new_counter)
-      
-      # Add to uploaded_datasets with "loaded" status
-      current_datasets <- uploaded_datasets()
-      
-      new_dataset <- list(
-        id = dataset_id,
-        file_name = filename,
-        data = NULL,  # Not needed for loaded datasets
-        format_info = list(n_samples = result$data$n_samples),
-        upload_time = Sys.time(),
-        status = "loaded",
-        processed_data = result$data,
-        source_format = result$format,
-        data_type = result$data_type
-      )
-      
-      current_datasets[[dataset_id]] <- new_dataset
-      uploaded_datasets(current_datasets)
-      
-      cat(sprintf(
-        "[LOAD] Added loaded dataset: %s (ID: %s, Type: %s)\n",
-        filename,
-        dataset_id,
-        result$data_type
-      ))
+      })
       
       removeModal()
-      
-      # Show appropriate notification based on data type
-      if (result$data_type == "full") {
-        showNotification(
-          HTML(sprintf(
-            "<strong>Loaded %s</strong><br/>Navigate to Review Endpoints or Report Builder as needed.",
-            filename
-          )),
-          type = "message",
-          duration = 2
-        )
-      } else {
-        showNotification(
-          HTML(sprintf(
-            "<strong>Loaded %s</strong><br/>This file contains metrics only. Navigate to Report Builder to create reports.",
-            filename
-          )),
-          type = "warning",
-          duration = 3
-        )
-      }
     })
     
     # Handle delete file button clicks
@@ -1751,8 +1828,8 @@ mod_data_overview_server <- function(id, app_data) {
       # Call delete utility function
       result <- delete_processed_data(filepath)
       
-      # Handle result
-      if (result$success) {
+      # Safe type checking before accessing $success
+      if (is.list(result) && isTRUE(result$success)) {
         showNotification(
           sprintf("Deleted: %s", filename),
           type = "message",
@@ -1762,9 +1839,15 @@ mod_data_overview_server <- function(id, app_data) {
         # Refresh saved files list
         saved_files_trigger(saved_files_trigger() + 1)
         
-      } else {
+      } else if (is.list(result)) {
         showNotification(
           sprintf("Delete failed: %s", result$message),
+          type = "error",
+          duration = 3
+        )
+      } else {
+        showNotification(
+          "Delete failed: Unexpected error",
           type = "error",
           duration = 3
         )
@@ -1774,7 +1857,7 @@ mod_data_overview_server <- function(id, app_data) {
     })
     
     # =========================================================================
-    # GENERATED REPORTS: Display with Search/Filter (NEW - Item #5)
+    # GENERATED REPORTS: Display with Search/Filter
     # =========================================================================
     
     output$generated_reports_list <- renderUI({
