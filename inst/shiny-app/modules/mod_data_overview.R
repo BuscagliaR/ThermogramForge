@@ -1008,10 +1008,41 @@ mod_data_overview_server <- function(id, app_data) {
             )
           )
           
+        } else if (dataset$status == "loaded" && 
+                   !is.null(dataset$processed_data) && 
+                   !is.null(dataset$processed_data$samples)) {
+          # LOADED RDS datasets: Has full data with samples - Show all 3 buttons
+          cat(sprintf("[PROCESSED_UI]     Status is LOADED (RDS) - showing all 3 buttons\n"))
+          
+          button_set <- div(
+            class = "btn-group-sm",
+            role = "group",
+            actionButton(
+              ns(paste0("review_", dataset$id)),
+              "Review Endpoints",
+              icon = icon("chart-line"),
+              class = "btn-primary btn-sm me-1",
+              title = "Manually review and adjust baseline endpoints"
+            ),
+            actionButton(
+              ns(paste0("save_", dataset$id)),
+              "Save to Disk",
+              icon = icon("save"),
+              class = "btn-success btn-sm me-1",
+              title = "Save processed data to local disk"
+            ),
+            actionButton(
+              ns(paste0("report_", dataset$id)),
+              "Create Report",
+              icon = icon("file-alt"),
+              class = "btn-info btn-sm",
+              title = "Generate metrics report"
+            )
+          )
+          
         } else if (dataset$status == "loaded") {
-          # LOADED datasets: Only "Create Report" button
-          # (CSV/Excel files - read-only, cannot be reviewed or re-saved)
-          cat(sprintf("[PROCESSED_UI]     Status is LOADED - showing only Create Report button\n"))
+          # LOADED CSV/EXCEL datasets: Metrics only, no samples - Show ONLY Report
+          cat(sprintf("[PROCESSED_UI]     Status is LOADED (CSV/Excel) - showing only Create Report button\n"))
           
           button_set <- div(
             class = "btn-group-sm",
@@ -1327,11 +1358,10 @@ mod_data_overview_server <- function(id, app_data) {
       
       cat(sprintf("[NAVIGATE] ✓ app_data$processed_data updated\n"))
       
-      # Switch to Report Builder tab
       updateNavbarPage(
         session = session,
         inputId = "main_navbar",
-        selected = "report_builder"
+        selected = "Report Builder"
       )
       
       cat(sprintf("[NAVIGATE] ✓ Switched to Report Builder tab\n"))
@@ -1341,7 +1371,7 @@ mod_data_overview_server <- function(id, app_data) {
       showNotification(
         sprintf("Loaded '%s' for report generation", dataset$file_name),
         type = "message",
-        duration = 2
+        duration = 3
       )
     }
     
