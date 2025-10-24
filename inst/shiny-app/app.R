@@ -28,6 +28,13 @@ library(dplyr)
 library(readr)
 library(readxl)
 
+# === Force inclusion in manifest ===
+# These packages are used in processing_utils.R and must be in manifest
+library(ThermogramBaseline)
+library(tlbparam)
+library(forecast)
+# === End manifest inclusion ===
+
 # Source utility files
 source("utils/theme.R")
 source("utils/data_utils.R")
