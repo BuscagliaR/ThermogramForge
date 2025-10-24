@@ -220,7 +220,7 @@
     },
     "ThermogramBaseline": {
       "Source": "github",
-      "Repository": null,
+      "Repository": "BuscagliaR/Thermogram_Baseline",
       "description": {
         "Package": "ThermogramBaseline",
         "Title": "Automates Thermogram Baseline Subtraction",
@@ -2722,7 +2722,7 @@
     },
     "tlbparam": {
       "Source": "github",
-      "Repository": null,
+      "Repository": "BuscagliaR/tlbparam",
       "description": {
         "Package": "tlbparam",
         "Title": "What the Package Does (One Line, Title Case)",
