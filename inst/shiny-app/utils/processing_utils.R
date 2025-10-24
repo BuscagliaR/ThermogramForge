@@ -1432,7 +1432,11 @@ delete_processed_data <- function(filepath) {
       }
     }
     
-    return(TRUE)
+    
+    return(list(
+      success = TRUE,
+      message = sprintf("Successfully deleted: %s", basename(filepath))
+    ))
     
   }, error = function(e) {
     cat(sprintf("[DELETE] ERROR: %s\n", e$message))
