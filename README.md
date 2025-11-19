@@ -163,7 +163,7 @@ If you use ThermogramForge in your research, please cite:
 
 ```bibtex
 @software{thermogramforge_r,
-  author = {Reger, Karl and Bucscaglia, Robert},
+  author = {Reger, Karl and Buscaglia, Robert},
   title = {ThermogramForge: Interactive Thermal Liquid Biopsy Analysis},
   year = {2025},
   url = {https://github.com/BuscagliaR/ThermogramForge},
