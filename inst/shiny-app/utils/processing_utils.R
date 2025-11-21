@@ -1446,3 +1446,408 @@ delete_processed_data <- function(filepath) {
     ))
   })
 }
+
+# ==============================================================================
+# CALCULATE TLBPARAM METRICS
+# ==============================================================================
+
+#' Calculate Thermogram Metrics Using tlbparam
+#'
+#' @description
+#' Converts processed baseline-subtracted thermogram data to tlbparam format
+#' and calculates requested metrics using the tlbparam R package. This function
+#' handles the mapping between UI-friendly metric names (e.g., "peak_1", "tfm")
+#' and tlbparam's expected names (e.g., "Peak 1", "TFM").
+#'
+#' @details
+#' **Workflow:**
+#' 1. Validates input data structure
+#' 2. Maps UI metric names to tlbparam metric names
+#' 3. Converts processed data to tlbparam wide format (SampleCode + T45:T90 columns)
+#' 4. Calls `tlbparam::clean_thermograms()` with requested metrics
+#' 5. Extracts only requested metrics (temperature columns excluded)
+#' 6. Renames result columns back to UI names
+#'
+#' **Supported Metrics (UI Name → tlbparam Name):**
+#' \itemize{
+#'   \item Peak metrics: peak_1→Peak 1, peak_2→Peak 2, peak_3→Peak 3, peak_f→Peak F
+#'   \item Temperature peaks: tpeak_1→TPeak 1, tpeak_2→TPeak 2, tpeak_3→TPeak 3, tpeak_f→TPeak F
+#'   \item Global: area→Area, tfm→TFM, width→Width, max_dcp→Max, tmax→TMax,
+#'     min_dcp→Min, tmin→TMin, median_dcp→Median
+#'   \item Valley: v12→V1.2, tv12→TV1.2
+#'   \item Ratios: peak1_peak2_ratio→Peak 1 / Peak 2, peak1_peak3_ratio→Peak 1 / Peak 3,
+#'     peak2_peak3_ratio→Peak 2 / Peak 3, v12_peak1_ratio→V1.2 / Peak 1,
+#'     v12_peak2_ratio→V1.2 / Peak 2, v12_peak3_ratio→V1.2 / Peak 3
+#' }
+#'
+#' @param processed_data
+#'   List containing processed thermogram data. Expected structure:
+#'   \itemize{
+#'     \item `samples`: Named list of sample objects, each containing:
+#'       \itemize{
+#'         \item `sample_id`: Sample identifier string
+#'         \item `temp_on_grid`: Numeric vector of temperatures (°C)
+#'         \item `dcp_baseline_subtracted`: Numeric vector of baseline-subtracted dCp values
+#'         \item Additional fields like `lower_endpoint`, `upper_endpoint`, etc.
+#'       }
+#'     \item `summary`: Summary statistics (optional)
+#'   }
+#'
+#' @param selected_metrics
+#'   Character vector of metric names to calculate (UI names, lowercase).
+#'   Example: `c("peak_1", "tfm", "area")`.
+#'   Invalid metric names are silently ignored with a warning message.
+#'
+#' @return
+#'   Data frame with structure:
+#'   \itemize{
+#'     \item Row 1+: One row per sample
+#'     \item Column 1: `SampleCode` (sample identifiers)
+#'     \item Columns 2+: Requested metrics (in order specified)
+#'   }
+#'   Returns `NULL` if:
+#'   - Input validation fails
+#'   - Data conversion fails
+#'   - `tlbparam::clean_thermograms()` fails
+#'   - No valid metrics remain after mapping
+#'
+#' @seealso
+#'   \code{\link{convert_to_tlbparam_format}()} for data format conversion
+#'   \code{tlbparam::clean_thermograms()} from the tlbparam package
+#'
+#' @examples
+#' \dontrun{
+#'   # Generate metrics for multiple samples
+#'   metrics <- calculate_tlbparam_metrics(
+#'     processed_data = my_processed_data,
+#'     selected_metrics = c("peak_1", "peak_2", "tfm", "area")
+#'   )
+#'   # Result: data frame with columns: SampleCode, peak_1, peak_2, tfm, area
+#'   # Each row is one sample, with calculated metric values
+#'   head(metrics)
+#'
+#'   # Common use case: Report generation
+#'   report_metrics <- calculate_tlbparam_metrics(
+#'     processed_data = app_data$processed_data,
+#'     selected_metrics = c("tpeak_1", "tpeak_2", "area", "tfm", "width")
+#'   )
+#'   # Export to CSV for downstream analysis
+#'   write.csv(report_metrics, "thermogram_report.csv", row.names = FALSE)
+#' }
+#'
+#' @keywords internal
+#' @export
+calculate_tlbparam_metrics <- function(processed_data, selected_metrics) {
+  
+  cat("\n[METRICS] ========================================\n")
+  cat("[METRICS] Starting tlbparam metric calculation\n")
+  
+  if (!is.list(processed_data) || !("samples" %in% names(processed_data))) {
+    cat("[METRICS] ❌ ERROR: Invalid processed_data\n")
+    return(NULL)
+  }
+  
+  if (length(processed_data$samples) == 0) {
+    cat("[METRICS] ❌ ERROR: No samples\n")
+    return(NULL)
+  }
+  
+  cat(sprintf("[METRICS] Input validation: ✓ (%d samples, %d metrics)\n",
+              length(processed_data$samples), length(selected_metrics)))
+  
+  # MAP UI metric names to tlbparam names
+  metric_mapping <- list(
+    "peak_1" = "Peak 1", "peak_2" = "Peak 2", "peak_3" = "Peak 3", "peak_f" = "Peak F",
+    "tpeak_1" = "TPeak 1", "tpeak_2" = "TPeak 2", "tpeak_3" = "TPeak 3", "tpeak_f" = "TPeak F",
+    "area" = "Area", "tfm" = "TFM", "width" = "Width",
+    "max_dcp" = "Max", "tmax" = "TMax", "min_dcp" = "Min", "tmin" = "TMin", "median_dcp" = "Median",
+    "v12" = "V1.2", "tv12" = "TV1.2",
+    "peak1_peak2_ratio" = "Peak 1 / Peak 2", "peak1_peak3_ratio" = "Peak 1 / Peak 3",
+    "peak2_peak3_ratio" = "Peak 2 / Peak 3",
+    "v12_peak1_ratio" = "V1.2 / Peak 1", "v12_peak2_ratio" = "V1.2 / Peak 2", "v12_peak3_ratio" = "V1.2 / Peak 3"
+  )
+  
+  # Convert UI names to tlbparam names
+  tlbparam_metrics <- character()
+  for (metric in tolower(selected_metrics)) {
+    if (metric %in% names(metric_mapping)) {
+      tlbparam_metrics <- c(tlbparam_metrics, metric_mapping[[metric]])
+      cat(sprintf("[METRICS] ✓ Mapped '%s' → '%s'\n", metric, metric_mapping[[metric]]))
+    }
+  }
+  
+  if (length(tlbparam_metrics) == 0) {
+    cat("[METRICS] ❌ ERROR: No valid metrics\n")
+    return(NULL)
+  }
+  
+  # Convert to tlbparam format
+  cat("[METRICS] Converting to tlbparam wide format...\n")
+  tlbparam_data <- tryCatch(convert_to_tlbparam_format(processed_data), error = function(e) NULL)
+  
+  if (is.null(tlbparam_data)) {
+    cat("[METRICS] ❌ ERROR: Conversion failed\n")
+    return(NULL)
+  }
+  
+  cat(sprintf("[METRICS] ✓ Converted: %d samples × %d columns\n",
+              nrow(tlbparam_data), ncol(tlbparam_data)))
+  
+  # Call tlbparam::clean_thermograms with mapped metric names
+  cat("[METRICS] Calling tlbparam::clean_thermograms()...\n")
+  
+  cleaned_data <- tryCatch({
+    tlbparam::clean_thermograms(
+      df = tlbparam_data,
+      type = "Plasma",
+      column = "SampleCode",
+      low_temp = "T45",
+      high_temp = "T90",
+      temp_range = seq(45, 90, by = 0.1),
+      summary = tlbparam_metrics,
+      lag = FALSE
+    )
+  }, error = function(e) {
+    cat(sprintf("[METRICS] ❌ clean_thermograms error: %s\n", e$message))
+    return(NULL)
+  })
+  
+  if (is.null(cleaned_data)) {
+    cat("[METRICS] ❌ ERROR: clean_thermograms failed\n")
+    return(NULL)
+  }
+  
+  # Extract ONLY the requested metric columns (not temperature columns)
+  cat("[METRICS] Extracting requested metrics...\n")
+  
+  cols_to_extract <- c("SampleCode")
+  for (tlbparam_name in tlbparam_metrics) {
+    if (tlbparam_name %in% names(cleaned_data)) {
+      cols_to_extract <- c(cols_to_extract, tlbparam_name)
+      cat(sprintf("[METRICS] ✓ Including '%s'\n", tlbparam_name))
+    }
+  }
+  
+  result <- cleaned_data[, cols_to_extract, drop = FALSE]
+  
+  # Rename back to UI names
+  new_names <- c("SampleCode")
+  for (i in 2:length(cols_to_extract)) {
+    tlbparam_name <- cols_to_extract[i]
+    ui_name <- names(metric_mapping)[which(unlist(metric_mapping) == tlbparam_name)]
+    new_names <- c(new_names, ui_name)
+  }
+  names(result) <- new_names
+  
+  cat(sprintf("[METRICS] ✅ SUCCESS: %d samples × %d columns\n",
+              nrow(result), ncol(result)))
+  cat("[METRICS] ========================================\n\n")
+  
+  return(result)
+}
+
+
+#' Validate CSV Format with Helpful Feedback
+#'
+#' @description
+#' Provides comprehensive validation for CSV files with specific error messages
+#' to help users fix format issues.
+#'
+#' @param raw_data Data frame from CSV file
+#' @param format_info List from detect_data_format() with format metadata
+#'
+#' @return List with:
+#'   \itemize{
+#'     \item valid: Logical - TRUE if file is valid
+#'     \item errors: Character vector of critical issues
+#'     \item warnings: Character vector of non-critical issues
+#'     \item suggestions: Character vector of actionable suggestions
+#'     \item message: HTML-formatted message for user display
+#'   }
+#'
+#' @export
+validate_csv_format <- function(raw_data, format_info) {
+  
+  errors <- character()
+  warnings <- character()
+  suggestions <- character()
+  
+  cat("\n[VALIDATION] ========================================\n")
+  cat("[VALIDATION] CSV Format Validation\n")
+  cat("[VALIDATION] ========================================\n")
+  
+  # Check basic structure
+  if (!is.data.frame(raw_data) || nrow(raw_data) == 0) {
+    errors <- c(errors, "File is empty or not a valid CSV")
+    suggestions <- c(suggestions,
+                     "• Ensure CSV file contains data rows",
+                     "• Check that Temperature and dCp columns are present")
+    return_validation_result(errors, warnings, suggestions)
+  }
+  
+  cat("[VALIDATION] Data shape: ", nrow(raw_data), "rows ×", ncol(raw_data), "columns\n")
+  
+  # Check by format type
+  if (format_info$data_format == "standard") {
+    
+    temp_col <- format_info$temperature_col
+    dcp_col <- format_info$dcp_col
+    
+    if (!(temp_col %in% names(raw_data))) {
+      errors <- c(errors,
+                  sprintf("Temperature column '%s' not found", temp_col))
+      suggestions <- c(suggestions,
+                       "• Rename your temperature column to 'Temperature' or 'Temp'")
+    }
+    
+    if (!(dcp_col %in% names(raw_data))) {
+      errors <- c(errors,
+                  sprintf("dCp column '%s' not found", dcp_col))
+      suggestions <- c(suggestions,
+                       "• Rename your dCp column to 'dCp' or 'Heat Flow'")
+    }
+    
+    # Check data types
+    if (temp_col %in% names(raw_data)) {
+      if (!is.numeric(raw_data[[temp_col]])) {
+        errors <- c(errors,
+                    sprintf("Temperature column is not numeric (found: %s)",
+                            class(raw_data[[temp_col]])[1]))
+        suggestions <- c(suggestions,
+                         "• Ensure all temperature values are numbers")
+      }
+    }
+    
+    if (dcp_col %in% names(raw_data)) {
+      if (!is.numeric(raw_data[[dcp_col]])) {
+        warnings <- c(warnings,
+                      sprintf("dCp column is not numeric (found: %s)",
+                              class(raw_data[[dcp_col]])[1]))
+        suggestions <- c(suggestions,
+                         "• Ensure all dCp values are numbers (will attempt conversion)")
+      }
+    }
+    
+    cat("[VALIDATION] Format: Single sample\n")
+    
+  } else if (format_info$data_format == "multi_sample_long") {
+    
+    if (!("Sample_ID" %in% names(raw_data))) {
+      errors <- c(errors,
+                  "Sample_ID column not found in multi-sample format")
+      suggestions <- c(suggestions,
+                       "• Add a 'Sample_ID' column identifying each sample",
+                       "• Example: 'Sample1', 'Sample2', 'T1a', '1a'")
+    } else {
+      n_unique <- length(unique(raw_data$Sample_ID))
+      cat(sprintf("[VALIDATION] Found %d unique samples\n", n_unique))
+      
+      if (n_unique < 2) {
+        warnings <- c(warnings,
+                      sprintf("Only %d unique sample detected", n_unique))
+      }
+    }
+    
+    cat("[VALIDATION] Format: Multi-sample (long)\n")
+    
+  } else if (format_info$data_format == "multi_sample_wide") {
+    
+    cat(sprintf("[VALIDATION] Format: Multi-sample (wide): %d samples detected\n",
+                format_info$n_samples))
+    
+    for (id in format_info$sample_ids) {
+      temp_col <- sprintf("T%s", id)
+      dcp_col <- id
+      
+      if (!(temp_col %in% names(raw_data))) {
+        errors <- c(errors,
+                    sprintf("Temperature column 'T%s' not found for sample '%s'",
+                            id, id))
+      }
+      
+      if (!(dcp_col %in% names(raw_data))) {
+        errors <- c(errors,
+                    sprintf("dCp column '%s' not found for sample '%s'",
+                            id, id))
+      }
+    }
+    
+    suggestions <- c(suggestions,
+                     "• Wide format requires paired columns: T[SampleID] and [SampleID]",
+                     "• Example: T1a, 1a (temperature and dCp for sample 1a)")
+  }
+  
+  # Check data quality
+  if (nrow(raw_data) < 10) {
+    warnings <- c(warnings,
+                  sprintf("File has only %d data points (minimum 10 recommended)",
+                          nrow(raw_data)))
+    suggestions <- c(suggestions,
+                     "• Thermograms with fewer than 10 points may not show clear peaks")
+  }
+  
+  if (nrow(raw_data) > 10000) {
+    warnings <- c(warnings,
+                  sprintf("File has %d data points (very large)", nrow(raw_data)))
+    suggestions <- c(suggestions,
+                     "• Processing may be slow for very large files")
+  }
+  
+  cat(sprintf("[VALIDATION] Errors: %d | Warnings: %d | Suggestions: %d\n",
+              length(errors), length(warnings), length(suggestions)))
+  
+  return_validation_result(errors, warnings, suggestions)
+}
+
+
+#' Format Validation Results for Display
+#'
+#' @keywords internal
+#' @noRd
+return_validation_result <- function(errors, warnings, suggestions) {
+  
+  valid <- length(errors) == 0
+  
+  # Build HTML message for user
+  message_parts <- character()
+  
+  if (!valid) {
+    message_parts <- c(message_parts,
+                       "<div class='alert alert-danger'>",
+                       "<strong>❌ Validation Errors:</strong>",
+                       "<ul>",
+                       paste(sprintf("<li>%s</li>", errors), collapse = ""),
+                       "</ul>",
+                       "</div>")
+  }
+  
+  if (length(warnings) > 0) {
+    message_parts <- c(message_parts,
+                       "<div class='alert alert-warning'>",
+                       "<strong>⚠ Warnings:</strong>",
+                       "<ul>",
+                       paste(sprintf("<li>%s</li>", warnings), collapse = ""),
+                       "</ul>",
+                       "</div>")
+  }
+  
+  if (length(suggestions) > 0 && (length(errors) > 0 || length(warnings) > 0)) {
+    message_parts <- c(message_parts,
+                       "<div class='alert alert-info'>",
+                       "<strong>💡 Suggestions:</strong>",
+                       "<ul>",
+                       paste(sprintf("<li>%s</li>", suggestions), collapse = ""),
+                       "</ul>",
+                       "</div>")
+  }
+  
+  list(
+    valid = valid,
+    errors = errors,
+    warnings = warnings,
+    suggestions = suggestions,
+    message = HTML(paste(message_parts, collapse = ""))
+  )
+}
+
+
