@@ -68,3 +68,6 @@ tests/testthat/_snaps/
 
 # Raw data
 data-raw/
+
+# Reports
+inst/shiny-app/reports/
