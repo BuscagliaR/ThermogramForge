@@ -1,694 +1,1987 @@
 # ==============================================================================
-# Upload Modal Sub-Module
+# Review Endpoints Module - ThermogramForge
 # ==============================================================================
 #
-# FILE: mod_upload_modal.R
-# MODULE: Upload Modal
-# VERSION: 1.1.0
+# FILE: mod_review_endpoints.R
+# VERSION: 3.0
 # AUTHOR: Chris Reger
-# LAST UPDATED: December 9, 2024
+# DATE: December 2025
 #
-
-# ==============================================================================
-# PURPOSE
-# ==============================================================================
+# PURPOSE:
+#   Interactive review and manual adjustment of baseline endpoints for
+#   thermogram samples. Provides visualization of raw and baseline-subtracted
+#   data, click-to-adjust endpoint modification, and comprehensive undo/redo
+#   history tracking.
 #
-# Self-contained sub-module handling the file upload workflow for ThermogramForge.
-# This module manages the upload modal dialog, including:
+# FEATURES:
+#   - Interactive sample grid with sorting and filtering (via DT)
+#   - Dual plot views: Raw Thermogram and Baseline Subtracted
+#   - Click-to-adjust manual endpoint modification on plots
+#   - Real-time baseline recalculation after adjustments
+#   - Full undo/redo history system for all changes
+#   - Review status tracking (Reviewed checkbox)
+#   - Sample exclusion capability (Exclude checkbox)
+#   - Previous/Next sample navigation
+#   - Signal detection status display
+#   - Save processed data directly from this tab
 #
-#   - File selection (CSV and Excel formats)
-#   - Excel multi-sheet detection and selection
-#   - Live data preview
-#   - Temperature range parameters
-#   - Advanced baseline detection options
+# UI COMPONENTS:
+#   - Sample grid table (left panel, ~40% width)
+#     - Columns: Sample, Status, Lower, Upper, Reviewed, Exclude
+#     - Click row to select sample
+#     - Color-coded status badges (Signal/No Signal)
+#   - Plot area (right panel, ~60% width)
+#     - View toggle: Raw Thermogram / Baseline Subtracted
+#     - Interactive plotly chart with click events
+#     - Endpoint adjustment buttons
+#   - Control buttons
+#     - Set Lower/Upper Endpoint (enters adjustment mode)
+#     - Undo/Redo (history navigation)
+#     - Previous/Next (sample navigation)
+#     - Save Data (opens save modal)
 #
-# Designed to be called from mod_data_overview.R as a sub-module.
+# DATA FLOW:
+#   1. User selects sample from grid
+#   2. Plot updates to show selected sample
+#   3. User clicks endpoint adjustment button → enters adjustment mode
+#   4. User clicks on plot → new endpoint captured
+#   5. Baseline recalculated with ThermogramBaseline::Fit_Thermogram()
+#   6. State pushed to undo stack
+#   7. UI updates to reflect changes
 #
-# ==============================================================================
-# ARCHITECTURE
-# ==============================================================================
+# STATE MANAGEMENT:
+#   - selected_sample: Currently selected sample ID
+#   - plot_view: "raw" or "baseline_subtracted"
+#   - adjustment_mode: NULL, "lower", or "upper"
+#   - app_data$undo_stack: List of previous states for undo
+#   - app_data$redo_stack: List of undone states for redo
 #
-# This module follows a "trigger + return reactive" pattern:
-#   1. Parent module calls mod_upload_modal_server() with a trigger reactive
-#   2. When trigger fires, sub-module shows modal from within its own context
-#   3. On confirm, sub-module returns uploaded data via reactive
-#   4. Parent observes the reactive and processes new uploads
+# SAMPLE STATE STRUCTURE (captured/restored):
+#   - lower_endpoint: Lower baseline endpoint temperature
+#   - upper_endpoint: Upper baseline endpoint temperature
+#   - baseline_subtracted: Baseline-subtracted dCp values
+#   - has_signal: Boolean indicating thermal signature presence
+#   - manual_adjustment: Boolean if manually adjusted
+#   - lower_manual: Boolean if lower endpoint manually set
+#   - upper_manual: Boolean if upper endpoint manually set
+#   - reviewed: Boolean review status
+#   - excluded: Boolean exclusion status
+#   - lower_endpoint_auto: Original auto-detected lower endpoint
+#   - upper_endpoint_auto: Original auto-detected upper endpoint
 #
-# KEY INSIGHT: The modal MUST be shown from within moduleServer() context
-# so that all input/output IDs are properly namespaced. Showing the modal
-# from the parent with manually constructed IDs causes namespace mismatches.
+# HELPER FUNCTIONS:
+#   - push_undo_state(): Save current state before modification
+#   - capture_sample_state(): Capture all sample properties
+#   - restore_sample_state(): Restore sample to previous state
+#   - can_undo() / can_redo(): Check if undo/redo available
+#   - reprocess_with_manual_endpoints(): Recalculate baseline with new endpoints
 #
-# REACTIVE FLOW:
-#   trigger (from parent)
-#       -> show modal (within sub-module server)
-#       -> file_upload (input)
-#       -> sheet detection (observer)
-#       -> excel_sheets (reactiveVal)
-#       -> sheet_selector_ui (renderUI)
-#       -> selected_sheet (reactiveVal)
-#       -> preview_data (reactive)
-#       -> preview_section_ui (renderUI)
-#
-# ON CONFIRM:
-#   confirm_upload (input)
-#       -> read file with parameters
-#       -> update uploaded_data reactiveVal
-#       -> close modal
-#
-# ==============================================================================
-# USAGE
-# ==============================================================================
-#
-# In parent module (mod_data_overview.R):
-#
-#   # Create trigger reactive
-#   upload_trigger <- reactiveVal(0)
-#
-#   # Initialize server (pass trigger)
-#   uploaded_result <- mod_upload_modal_server("upload_modal", upload_trigger)
-#   
-#   # Trigger modal from parent
-#   observeEvent(input$upload_btn, {
-#     upload_trigger(upload_trigger() + 1)  # Increment to trigger
-#   })
-#
-#   # Observe uploads
-#   observeEvent(uploaded_result(), {
-#     result <- uploaded_result()
-#     if (!is.null(result)) {
-#       # Process the uploaded data
-#     }
-#   }, ignoreNULL = TRUE)
-#
-# ==============================================================================
-# DEPENDENCIES
-# ==============================================================================
-#
-# R Packages:
+# DEPENDENCIES:
 #   - shiny: Core framework
-#   - shinyjs: JavaScript utilities (for toggle)
-#   - readxl: Excel file reading and sheet detection
-#   - readr: CSV file reading
+#   - DT: Interactive data tables
+#   - plotly: Interactive plots with click events
+#   - shinyjs: JavaScript operations (show/hide, delays)
+#   - ThermogramBaseline: Baseline fitting (Fit_Thermogram)
+#   - app_data: Shared reactive values from parent
 #
-# Project Files:
-#   - data_utils.R: read_thermogram_file()
+# USAGE:
+#   # In UI
+#   mod_review_endpoints_ui("review_endpoints")
+#   
+#   # In Server
+#   mod_review_endpoints_server("review_endpoints", app_data)
+#
+# NOTES:
+#   - Requires processed data in app_data$processed_data
+#   - Navigated to via "Review Endpoints" button in Data Overview
+#   - Changes are held in memory until explicitly saved
+#   - Save functionality writes to processed_data/ directory
 #
 # ==============================================================================
 
 
 # ==============================================================================
-# MODULE UI FUNCTION
+# UI FUNCTION
 # ==============================================================================
-#
-#' Upload Modal Sub-Module UI
+
+#' Review Endpoints UI
 #'
-#' Creates placeholder UI elements for the upload modal sub-module.
-#' The actual modal is shown dynamically via showModal() from the server.
+#' Creates the user interface for the Review Endpoints module. The UI is
+#' dynamically generated based on whether processed data is available.
 #'
-#' @param id Character string. Namespace ID for the module.
+#' @param id Character. Module namespace ID for proper Shiny namespacing.
 #'
-#' @return An empty tagList. All UI is rendered dynamically in the modal.
+#' @return tagList containing the module UI elements
 #'
 #' @details
-#' This function returns minimal/empty UI because the modal is shown 
-#' dynamically from within the server function. This ensures proper
-#' namespace handling for all inputs and outputs.
+#' The UI consists of:
+#' - A container div that holds dynamically rendered content
+#' - Content is rendered by review_content output in server
+#' - When no data: Shows "No data loaded" message
+#' - When data present: Shows sample grid + plot + controls
 #'
-#' @family upload_modal
-#' @seealso \code{\link{mod_upload_modal_server}}
+#' @examples
+#' \dontrun{
+#' # In app UI
+#' nav_panel(
+#'   title = "Review Endpoints",
+#'   mod_review_endpoints_ui("review_endpoints")
+#' )
+#' }
 #'
 #' @export
-mod_upload_modal_ui <- function(id) {
-  # No static UI needed - modal is shown dynamically from server
-  # This ensures all inputs/outputs are properly namespaced
-  tagList()
+mod_review_endpoints_ui <- function(id) {
+  ns <- NS(id)
+  
+  tagList(
+    div(
+      class = "container-fluid p-3",
+      uiOutput(ns("review_content"))
+    )
+  )
 }
 
 
 # ==============================================================================
-# MODULE SERVER FUNCTION
+# SERVER FUNCTION
 # ==============================================================================
-#
-#' Upload Modal Sub-Module Server
+
+#' Review Endpoints Server
 #'
-#' Server logic for the upload modal, handling file selection, sheet detection,
-#' preview generation, and data upload.
+#' Server logic for the Review Endpoints module. Handles sample selection,
+#' plot rendering, endpoint adjustment, undo/redo, and save operations.
 #'
-#' @param id Character string. Namespace ID matching the UI function.
-#' @param trigger A reactive expression that triggers the modal to open.
-#'   Typically a reactiveVal that gets incremented when upload button is clicked.
+#' @param id Character. Module namespace ID matching the UI.
+#' @param app_data reactiveValues. Shared application state containing:
+#'   - processed_data: List with samples and processing metadata
+#'   - undo_stack: List of previous states for undo functionality
+#'   - redo_stack: List of undone states for redo functionality
+#'   - current_dataset_id: ID of currently active dataset
+#'   - current_dataset_name: Display name of current dataset
 #'
-#' @return A reactive expression that returns the uploaded data when available,
-#'   or NULL when no upload has occurred. The returned list contains:
-#'   \describe{
-#'     \item{data}{The raw thermogram data frame}
-#'     \item{format_info}{List with format details (n_samples, format_type, etc.)}
-#'     \item{file_name}{Original file name}
-#'     \item{sheet}{Excel sheet name (NULL for CSV)}
-#'     \item{params}{List of all parameters (temp_min, temp_max, etc.)}
-#'   }
+#' @return NULL (module operates via side effects on app_data)
 #'
 #' @details
-#' The server manages several reactive components:
+#' The server manages several interconnected reactive components:
 #'
-#' \strong{Key Design Decision:}
-#' The modal is shown from WITHIN the moduleServer context using showModal().
-#' This ensures that all input IDs (file_upload, sheet_selector, etc.) are
-#' automatically namespaced correctly. Attempting to show the modal from the
-#' parent module causes namespace mismatches.
+#' **Sample Selection:**
+#' - Responds to grid row clicks
+#' - Updates plot and controls for selected sample
+#' - Handles programmatic vs user-initiated selection
 #'
-#' \strong{Reactive Values:}
-#' \itemize{
-#'   \item \code{excel_sheets}: Available sheet names (NULL for CSV)
-#'   \item \code{selected_sheet}: Currently selected sheet
-#'   \item \code{uploaded_data}: Result of successful upload (returned to parent)
+#' **Plot Rendering:**
+#' - Creates interactive plotly charts
+#' - Supports view toggle (raw vs baseline-subtracted)
+#' - Captures click events for endpoint adjustment
+#'
+#' **Endpoint Adjustment:**
+#' - Enters adjustment mode when button clicked
+#' - Captures plot click coordinates
+#' - Recalculates baseline using ThermogramBaseline
+#' - Updates sample state and UI
+#'
+#' **Undo/Redo System:**
+#' - Captures state before each modification
+#' - Maintains separate undo and redo stacks
+#' - Restores complete sample state on undo/redo
+#'
+#' @examples
+#' \dontrun{
+#' # In app server
+#' mod_review_endpoints_server("review_endpoints", app_data)
 #' }
 #'
-#' @family upload_modal
-#' @seealso \code{\link{mod_upload_modal_ui}}
-#'
 #' @export
-mod_upload_modal_server <- function(id, trigger) {
+mod_review_endpoints_server <- function(id, app_data) {
   moduleServer(id, function(input, output, session) {
     
-    # Namespace function for this module
     ns <- session$ns
     
     # =========================================================================
     # REACTIVE VALUES
     # =========================================================================
+    # Local reactive values for module state management
     
-    # Excel sheet names detected from uploaded file (NULL for CSV)
-    excel_sheets <- reactiveVal(NULL)
+    # Currently selected sample ID (NULL if none selected)
+    selected_sample <- reactiveVal(NULL)
     
-    # Currently selected sheet name
-    selected_sheet <- reactiveVal(NULL)
+    # Flag to distinguish programmatic vs user selection
+    programmatic_selection <- reactiveVal(FALSE)
     
-    # Result of successful upload - parent module observes this
-    uploaded_data <- reactiveVal(NULL)
+    # Current plot view mode: "raw" or "baseline_subtracted"
+    plot_view <- reactiveVal("baseline_subtracted")
+    
+    # Endpoint adjustment mode: NULL, "lower", or "upper"
+    adjustment_mode <- reactiveVal(NULL)
+    
+    # Key for deduplicating plot clicks
+    last_click_key <- reactiveVal(NULL)
+    
+    # Checkbox update guards to prevent infinite loops
+    updating_checkboxes <- reactiveVal(FALSE)
+    last_reviewed_value <- reactiveVal(NULL)
+    last_excluded_value <- reactiveVal(NULL)
+    updating_from_checkbox <- reactiveVal(FALSE)
+    
+    # Flag to prevent multiple simultaneous adjustments
+    processing_adjustment <- reactiveVal(FALSE)
+    
+    # Trigger for forcing UI refresh
+    ui_refresh_trigger <- reactiveVal(0)
+    
+    # =========================================================================
+    # HELPER FUNCTIONS
+    # =========================================================================
+    
+    push_undo_state <- function(sample_id, action_type, previous_state) {
+      state_entry <- list(
+        sample_id = sample_id,
+        action_type = action_type,
+        previous_state = previous_state,
+        timestamp = Sys.time()
+      )
+      app_data$undo_stack <- c(app_data$undo_stack, list(state_entry))
+      app_data$redo_stack <- list()
+      cat(sprintf("[UNDO] Pushed state for sample %s (action: %s)\n", 
+                  sample_id, action_type))
+    }
+    
+    capture_sample_state <- function(sample_id) {
+      sample <- app_data$processed_data$samples[[sample_id]]
+      
+      captured_state <- list(
+        # Baseline and endpoints
+        lower_endpoint = sample$lower_endpoint,
+        upper_endpoint = sample$upper_endpoint,
+        baseline_subtracted = sample$baseline_subtracted,
+        
+        # Signal detection result - NOW CAPTURED
+        has_signal = if(is.null(sample$has_signal)) TRUE else sample$has_signal,
+        
+        # Adjustment tracking
+        manual_adjustment = if(is.null(sample$manual_adjustment)) FALSE else sample$manual_adjustment,
+        lower_manual = if(is.null(sample$lower_manual)) FALSE else sample$lower_manual,
+        upper_manual = if(is.null(sample$upper_manual)) FALSE else sample$upper_manual,
+        
+        # Review tracking
+        reviewed = if(is.null(sample$reviewed)) FALSE else sample$reviewed,
+        excluded = if(is.null(sample$excluded)) FALSE else sample$excluded,
+        
+        # Auto endpoints (for discard functionality)
+        lower_endpoint_auto = sample$lower_endpoint_auto,
+        upper_endpoint_auto = sample$upper_endpoint_auto
+      )
+      
+      cat(sprintf("[STATE] Captured state for %s (signal=%s, baseline_points=%d)\n",
+                  sample_id,
+                  captured_state$has_signal,
+                  length(captured_state$baseline_subtracted)))
+      
+      return(captured_state)
+    }
+    
+    restore_sample_state <- function(sample_id, state) {
+      cat(sprintf("[STATE] Restoring state for %s (signal=%s)\n", sample_id, state$has_signal))
+      
+      app_data$processed_data$samples[[sample_id]]$lower_endpoint <- state$lower_endpoint
+      app_data$processed_data$samples[[sample_id]]$upper_endpoint <- state$upper_endpoint
+      app_data$processed_data$samples[[sample_id]]$baseline_subtracted <- state$baseline_subtracted
+      
+      # FIXED: Now restore signal as well
+      app_data$processed_data$samples[[sample_id]]$has_signal <- state$has_signal
+      
+      app_data$processed_data$samples[[sample_id]]$manual_adjustment <- state$manual_adjustment
+      app_data$processed_data$samples[[sample_id]]$lower_manual <- state$lower_manual
+      app_data$processed_data$samples[[sample_id]]$upper_manual <- state$upper_manual
+      app_data$processed_data$samples[[sample_id]]$reviewed <- state$reviewed
+      app_data$processed_data$samples[[sample_id]]$excluded <- state$excluded
+      
+      if (!is.null(state$lower_endpoint_auto)) {
+        app_data$processed_data$samples[[sample_id]]$lower_endpoint_auto <- state$lower_endpoint_auto
+      }
+      if (!is.null(state$upper_endpoint_auto)) {
+        app_data$processed_data$samples[[sample_id]]$upper_endpoint_auto <- state$upper_endpoint_auto
+      }
+      
+      cat(sprintf("[STATE] [OK] Restored state for %s\n", sample_id))
+    }
+    
+    can_undo <- reactive({
+      length(app_data$undo_stack) > 0
+    })
+    
+    can_redo <- reactive({
+      length(app_data$redo_stack) > 0
+    })
+    
+    reprocess_with_manual_endpoints <- function(temperature, dcp, lower_endpoint, upper_endpoint) {
+      tryCatch({
+        # ---------------------------------------------------------------
+        # Step 1: Validate data
+        # ---------------------------------------------------------------
+        valid_idx <- !is.na(temperature) & !is.na(dcp)
+        if (sum(valid_idx) < 10) {
+          cat("[REPROCESS] ERROR: Insufficient data points\n")
+          return(list(success = FALSE, message = "Insufficient data points"))
+        }
+        
+        input_data <- data.frame(
+          Temperature = temperature[valid_idx],
+          dCp = dcp[valid_idx]
+        )
+        
+        # ---------------------------------------------------------------
+        # Step 2: Recalculate baseline with new endpoints
+        # ---------------------------------------------------------------
+        cat(sprintf("[REPROCESS] Recalculating baseline with endpoints: lower=%.1f, upper=%.1f\n", 
+                    lower_endpoint, upper_endpoint))
+        
+        baseline_result <- ThermogramBaseline::baseline.subtraction.byhand(
+          x = input_data,
+          lwr.temp = lower_endpoint,
+          upr.temp = upper_endpoint,
+          plot.on = FALSE
+        )
+        
+        if (is.null(baseline_result)) {
+          cat("[REPROCESS] ERROR: Baseline subtraction failed\n")
+          return(list(success = FALSE, message = "Baseline subtraction failed"))
+        }
+        
+        # ---------------------------------------------------------------
+        # Step 3: Interpolate to standard grid
+        # ---------------------------------------------------------------
+        final_result <- ThermogramBaseline::final.sample.interpolate(
+          x = baseline_result,
+          grid.temp = seq(45, 90, 0.1),
+          plot.on = FALSE
+        )
+        
+        if (is.null(final_result)) {
+          cat("[REPROCESS] ERROR: Interpolation failed\n")
+          return(list(success = FALSE, message = "Interpolation failed"))
+        }
+        
+        # ---------------------------------------------------------------
+        # Step 4: RE-EVALUATE SIGNAL with new baseline-subtracted data
+        # ---------------------------------------------------------------
+        # Create the processed data frame with new baseline-subtracted values
+        processed_data <- data.frame(
+          Temperature = final_result$Temperature,
+          dCp = final_result$dCp,
+          stringsAsFactors = FALSE
+        )
+        
+        cat("[REPROCESS] Running signal detection on updated baseline-subtracted data...\n")
+        
+        signal_result <- tryCatch({
+          ThermogramBaseline::signal.detection(processed_data)
+        }, error = function(e) {
+          cat(sprintf("[REPROCESS] WARNING: Signal detection failed: %s\n", e$message))
+          # Return NULL to indicate failure (will default to TRUE below)
+          NULL
+        })
+        
+        # Extract signal detection result safely
+        # signal.detection() returns a data frame with column 'result' 
+        # containing "Signal" or "No Signal"
+        has_signal <- TRUE  # Default assumption
+        
+        if (!is.null(signal_result) && is.data.frame(signal_result) && 
+            "result" %in% names(signal_result)) {
+          # Successfully got result - parse the string
+          result_string <- as.character(signal_result$result[1])
+          has_signal <- (result_string == "Signal")
+          cat(sprintf("[REPROCESS] Signal detection returned: '%s'\n", result_string))
+        } else if (!is.null(signal_result) && is.list(signal_result) && 
+                   !is.null(signal_result$has_signal)) {
+          # Fallback: some contexts might return list format
+          has_signal <- signal_result$has_signal
+        } else {
+          cat("[REPROCESS] Signal detection result format unexpected, defaulting to has_signal=TRUE\n")
+        }
+        
+        cat(sprintf("[REPROCESS] Signal detection result: has_signal=%s\n", has_signal))
+        
+        # ---------------------------------------------------------------
+        # Step 5: Return complete result with signal
+        # ---------------------------------------------------------------
+        result <- list(
+          success = TRUE,
+          lower_endpoint = lower_endpoint,
+          upper_endpoint = upper_endpoint,
+          baseline_subtracted = final_result$dCp,
+          has_signal = has_signal  # NEW: Include signal in result
+        )
+        
+        cat(sprintf("[REPROCESS] [OK] Reprocessing complete (signal=%s)\n", has_signal))
+        return(result)
+        
+      }, error = function(e) {
+        cat(sprintf("[REPROCESS] ERROR: Unexpected error during reprocessing: %s\n", e$message))
+        list(success = FALSE, message = e$message)
+      })
+    }
+    
+    # =========================================================================
+    # DATASET RELOAD OBSERVER (FIX FOR DATASET SWITCHING BUG)
+    # =========================================================================
+    
+    observeEvent(app_data$dataset_load_trigger, {
+      
+      req(app_data$dataset_load_trigger > 0)
+      
+      cat(sprintf("\n[REVIEW_ENDPOINTS] Dataset reload triggered (trigger=%d)\n", 
+                  app_data$dataset_load_trigger))
+      cat(sprintf("[REVIEW_ENDPOINTS] Loading dataset: %s\n", 
+                  app_data$current_dataset_name))
+      
+      if (is.null(app_data$processed_data)) {
+        cat("[REVIEW_ENDPOINTS] WARNING: No processed data available\n")
+        return()
+      }
+      
+      # Reset module state for new dataset
+      cat("[REVIEW_ENDPOINTS] Resetting module state for new dataset\n")
+      
+      # Clear selection
+      selected_sample(NULL)
+      
+      # Clear undo/redo stacks
+      app_data$undo_stack <- list()
+      app_data$redo_stack <- list()
+      
+      # Reset flags
+      adjustment_mode(NULL)
+      last_click_key(NULL)
+      last_reviewed_value(NULL)
+      last_excluded_value(NULL)
+      plot_view("baseline_subtracted")
+      
+      # Reset boolean flags
+      programmatic_selection(FALSE)
+      updating_checkboxes(FALSE)
+      updating_from_checkbox(FALSE)
+      processing_adjustment(FALSE)
+      
+      # Log successful reload
+      cat(sprintf("[REVIEW_ENDPOINTS] Dataset '%s' loaded successfully\n", 
+                  app_data$current_dataset_name))
+      cat(sprintf("[REVIEW_ENDPOINTS] Samples available: %d\n", 
+                  length(app_data$processed_data$samples)))
+      
+      # Show notification to user
+      showNotification(
+        sprintf("Loaded dataset: %s (%d samples)", 
+                app_data$current_dataset_name,
+                length(app_data$processed_data$samples)),
+        type = "message",
+        duration = 3
+      )
+      
+      # Force UI refresh by incrementing trigger
+      ui_refresh_trigger(isolate(ui_refresh_trigger()) + 1)
+      cat("[REVIEW_ENDPOINTS] UI refresh triggered\n")
+      
+    }, ignoreInit = TRUE, priority = 100)
     
     
     # =========================================================================
-    # SECTION 1: SHOW MODAL (Triggered by Parent)
-    # =========================================================================
-    # When parent increments the trigger, show the upload modal.
-    # CRITICAL: Modal is shown from HERE (inside moduleServer) so that
-    # all input/output IDs are properly namespaced.
+    # MAIN CONTENT RENDERING
     # =========================================================================
     
-    observeEvent(trigger(), {
+    output$review_content <- renderUI({
+      if (is.null(app_data$processed_data)) {
+        return(
+          div(
+            class = "alert alert-info",
+            icon("info-circle"), " No processed data available. Please upload and process data in the Data Overview tab.",
+            p(
+              actionButton(
+                ns("goto_overview"),
+                "Go to Data Overview",
+                icon = icon("arrow-left"),
+                class = "btn-primary"
+              )
+            )
+          )
+        )
+      }
       
-      cat("\n")
-      cat("========================================\n")
-      cat("[UPLOAD_MODAL] Trigger received - showing modal\n")
-      cat("========================================\n")
+      # ===== ADDED FOR BUG FIX - Force UI refresh when dataset changes =====
+      ui_refresh_trigger()  # Depend on the trigger to force refresh
+      # ======================================================================
       
-      # Reset state for new upload
-      excel_sheets(NULL)
-      selected_sheet(NULL)
+      tagList(
+        div(
+          class = "row mb-3",
+          div(
+            class = "col-12",
+            div(
+              class = "card",
+              div(
+                class = "card-body",
+                div(
+                  class = "d-flex justify-content-between align-items-center",
+                  div(
+                    h4(icon("chart-line"), " Review Baseline Endpoints", class = "mb-0"),
+                    p(
+                      class = "text-muted mb-0",
+                      sprintf("Dataset: %d samples processed", 
+                              app_data$processed_data$summary$n_success)
+                    )
+                  ),
+                  div(
+                    actionButton(
+                      ns("save_btn"),
+                      "Save Processed Data",
+                      icon = icon("save"),
+                      class = "btn-success"
+                    )
+                  )
+                )
+              )
+            )
+          )
+        ),
+        
+        div(
+          class = "row",
+          div(
+            class = "col-md-5",
+            div(
+              class = "card",
+              div(class = "card-header", icon("table"), " Sample Overview"),
+              div(class = "card-body", DT::dataTableOutput(ns("sample_grid")))
+            )
+          ),
+          
+          div(
+            class = "col-md-7",
+            div(
+              class = "card mb-3",
+              div(
+                class = "card-header d-flex justify-content-between align-items-center",
+                div(uiOutput(ns("plot_header"))),
+                div(uiOutput(ns("view_toggle_buttons")))
+              ),
+              div(
+                class = "card-body",
+                uiOutput(ns("adjustment_notification")),
+                uiOutput(ns("plot_area"))
+              )
+            ),
+            
+            div(
+              class = "card",
+              div(class = "card-header", icon("sliders-h"), " Review Controls"),
+              div(class = "card-body", uiOutput(ns("review_controls")))
+            )
+          )
+        )
+      )
+    })
+    
+    # =========================================================================
+    # NAVIGATION
+    # =========================================================================
+    
+    observeEvent(input$goto_overview, {
+      app_data$navigate_to <- "data_overview"
+    })
+    
+    observeEvent(input$view_raw, {
+      plot_view("raw")
+    })
+    
+    observeEvent(input$view_baseline, {
+      plot_view("baseline_subtracted")
+    })
+    
+    # =========================================================================
+    # SAMPLE GRID
+    # =========================================================================
+    
+    sample_grid_data <- reactive({
+      req(app_data$processed_data)
       
-      # Show the modal dialog
+      cat("[GRID_DATA] Building sample grid data\n")
+      
+      samples <- app_data$processed_data$samples
+      
+      # Initialize empty data frame with correct structure
+      grid_df <- data.frame(
+        ID = character(),
+        Signal = character(),
+        Lower = character(),
+        Upper = character(),
+        Reviewed = character(),
+        Exclude = character(),
+        stringsAsFactors = FALSE
+      )
+      
+      # Build grid data from samples
+      for (sample_id in names(samples)) {
+        sample <- samples[[sample_id]]
+        
+        # Only include successfully processed samples
+        if (isTRUE(sample$success)) {
+          
+          # Signal indicator
+          signal_icon <- if (isTRUE(sample$has_signal)) "[OK]" else "[X]"
+          
+          # Manual adjustment indicators - USE isTRUE() for safety
+          # isTRUE() returns FALSE for NULL, missing fields, NA, or logical(0)
+          lower_manual <- isTRUE(sample$lower_manual)
+          upper_manual <- isTRUE(sample$upper_manual)
+          
+          # Format endpoint text with manual/auto indicator
+          lower_text <- sprintf(
+            "%.1f deg C (%s)", 
+            sample$lower_endpoint, 
+            if (lower_manual) "Manual" else "Auto"
+          )
+          
+          upper_text <- sprintf(
+            "%.1f deg C (%s)", 
+            sample$upper_endpoint, 
+            if (upper_manual) "Manual" else "Auto"
+          )
+          
+          # Status indicators - USE isTRUE() for safety
+          reviewed_icon <- if (isTRUE(sample$reviewed)) "[OK]" else "[-]"
+          excluded_icon <- if (isTRUE(sample$excluded)) "[X]" else ""
+          
+          # Add row to grid
+          grid_df <- rbind(grid_df, data.frame(
+            ID = sample_id,
+            Signal = signal_icon,
+            Lower = lower_text,
+            Upper = upper_text,
+            Reviewed = reviewed_icon,
+            Exclude = excluded_icon,
+            stringsAsFactors = FALSE
+          ))
+          
+          cat(sprintf("[GRID_DATA]   Added sample: %s (manual: L=%s U=%s)\n", 
+                      sample_id, lower_manual, upper_manual))
+        } else {
+          cat(sprintf("[GRID_DATA]   Skipped sample: %s (success=FALSE)\n", sample_id))
+        }
+      }
+      
+      cat(sprintf("[GRID_DATA] [OK] Built grid with %d rows\n", nrow(grid_df)))
+      
+      grid_df
+    })
+    
+    
+    output$sample_grid <- DT::renderDataTable({
+      req(app_data$processed_data)
+      
+      # ===== ADDED FOR BUG FIX =====
+      ui_refresh_trigger()  # Force grid refresh when dataset changes
+      # =============================
+      
+      grid_data <- sample_grid_data()  # REMOVED isolate() wrapper
+      
+      DT::datatable(
+        grid_data,
+        selection = list(mode = "single", selected = 1),
+        rownames = FALSE,
+        options = list(
+          pageLength = 10,
+          lengthMenu = c(5, 10, 25, 50),
+          dom = 'ftp',
+          scrollY = "400px",
+          scrollCollapse = TRUE,
+          columnDefs = list(
+            list(targets = 0, className = "dt-left", width = "100px"),
+            list(targets = 1, className = "dt-center", width = "60px"),
+            list(targets = 2, className = "dt-left", width = "120px"),
+            list(targets = 3, className = "dt-left", width = "120px"),
+            list(targets = 4, className = "dt-center", width = "80px"),
+            list(targets = 5, className = "dt-center", width = "70px")
+          ),
+          autoWidth = FALSE
+        ),
+        class = "compact hover row-border"
+      ) %>%
+        DT::formatStyle(
+          'Signal',
+          color = DT::styleEqual(c('[OK]', '[X]'), c('#198754', '#dc3545')),
+          fontWeight = 'bold',
+          fontSize = '16px'
+        ) %>%
+        DT::formatStyle(
+          'Reviewed',
+          color = DT::styleEqual(c('[OK]', '[-]'), c('#198754', '#6c757d')),
+          fontWeight = 'bold',
+          fontSize = '16px'
+        ) %>%
+        DT::formatStyle(
+          'Exclude',
+          color = '#dc3545',
+          fontWeight = 'bold',
+          fontSize = '16px'
+        )
+    })
+    
+    # =========================================================================
+    # GRID SELECTION HANDLER
+    # =========================================================================
+    
+    observeEvent(input$sample_grid_rows_selected, {
+      if (isolate(updating_from_checkbox())) {
+        cat("[GRID] Ignoring row selection - checkbox update in progress\n")
+        return()
+      }
+      
+      if (isolate(programmatic_selection())) {
+        cat("[GRID] Ignoring row selection - programmatic\n")
+        return()
+      }
+      
+      req(input$sample_grid_rows_selected)
+      req(app_data$processed_data)
+      
+      grid_data <- sample_grid_data()
+      req(nrow(grid_data) > 0)
+      
+      selected_idx <- input$sample_grid_rows_selected
+      if (selected_idx < 1 || selected_idx > nrow(grid_data)) return()
+      
+      new_sample_id <- as.character(grid_data[[1]][selected_idx])
+      old_sample_id <- isolate(selected_sample())
+      
+      if (!is.null(old_sample_id) && old_sample_id == new_sample_id) return()
+      
+      cat(sprintf("[GRID] User selected row %d: sample %s\n", selected_idx, new_sample_id))
+      
+      if (!is.null(adjustment_mode())) {
+        adjustment_mode(NULL)
+        removeNotification(id = "adjustment_notification")
+      }
+      
+      sample <- app_data$processed_data$samples[[new_sample_id]]
+      last_reviewed_value(if(is.null(sample$reviewed)) FALSE else sample$reviewed)
+      last_excluded_value(if(is.null(sample$excluded)) FALSE else sample$excluded)
+      
+      selected_sample(new_sample_id)
+      
+    }, priority = 5, ignoreInit = FALSE)
+    
+    observe({
+      req(app_data$processed_data)
+      
+      if (is.null(selected_sample())) {
+        grid_data <- sample_grid_data()
+        if (nrow(grid_data) > 0) {
+          first_sample_id <- grid_data[[1]][1]
+          selected_sample(first_sample_id)
+          
+          sample <- app_data$processed_data$samples[[first_sample_id]]
+          last_reviewed_value(if(is.null(sample$reviewed)) FALSE else sample$reviewed)
+          last_excluded_value(if(is.null(sample$excluded)) FALSE else sample$excluded)
+          
+          cat(sprintf("[INIT] Auto-selected first sample: %s\n", first_sample_id))
+        }
+      }
+    })
+    
+    # =========================================================================
+    # PLOT HEADER AND VIEW TOGGLE
+    # =========================================================================
+    
+    output$plot_header <- renderUI({
+      req(selected_sample())
+      
+      sample <- app_data$processed_data$samples[[selected_sample()]]
+      
+      tagList(
+        icon("chart-line"), 
+        sprintf(" Thermogram: %s", selected_sample()),
+        if (!sample$has_signal) {
+          span(
+            icon("exclamation-triangle"),
+            " No Signal Detected",
+            class = "badge bg-warning ms-2"
+          )
+        }
+      )
+    })
+    
+    output$view_toggle_buttons <- renderUI({
+      current_view <- plot_view()
+      
+      div(
+        class = "btn-group btn-group-sm",
+        role = "group",
+        actionButton(
+          ns("view_raw"),
+          "Raw Thermogram",
+          class = if (current_view == "raw") "btn btn-primary" else "btn btn-outline-primary"
+        ),
+        actionButton(
+          ns("view_baseline"),
+          "Baseline Subtracted",
+          class = if (current_view == "baseline_subtracted") "btn btn-primary" else "btn btn-outline-primary"
+        )
+      )
+    })
+    
+    # =========================================================================
+    # ADJUSTMENT NOTIFICATION
+    # =========================================================================
+    
+    output$adjustment_notification <- renderUI({
+      mode <- adjustment_mode()
+      
+      if (!is.null(mode)) {
+        div(
+          class = "alert alert-info d-flex justify-content-between align-items-center mb-3",
+          div(
+            icon("hand-pointer"),
+            sprintf(" Click on the plot to set the %s endpoint", mode)
+          ),
+          actionButton(
+            ns("cancel_adjustment"),
+            "Cancel",
+            icon = icon("times"),
+            class = "btn btn-sm btn-outline-secondary"
+          )
+        )
+      }
+    })
+    
+    observeEvent(input$cancel_adjustment, {
+      cat("[CANCEL] Canceling adjustment mode\n")
+      adjustment_mode(NULL)
+    })
+    
+    # =========================================================================
+    # PLOT RENDERING
+    # =========================================================================
+    
+    output$plot_area <- renderUI({
+      plotly::plotlyOutput(ns("thermogram_plot"), height = "450px")
+    })
+    
+    output$thermogram_plot <- plotly::renderPlotly({
+      req(selected_sample())
+      req(app_data$processed_data)
+      
+      sample <- app_data$processed_data$samples[[selected_sample()]]
+      
+      if (!sample$success) return(NULL)
+      
+      current_view <- plot_view()
+      
+      if (current_view == "baseline_subtracted") {
+        y_data <- as.numeric(sample$baseline_subtracted)
+        x_data <- as.numeric(sample$temperature)
+        y_label <- "dCp (Baseline Subtracted)"
+      } else {
+        if (!is.null(sample$temperature_original)) {
+          x_data <- as.numeric(sample$temperature_original)
+        } else {
+          x_data <- as.numeric(sample$temperature)
+        }
+        y_data <- as.numeric(sample$dcp_original)
+        y_label <- "dCp (Raw)"
+      }
+      
+      min_len <- min(length(x_data), length(y_data))
+      x_data <- x_data[1:min_len]
+      y_data <- y_data[1:min_len]
+      
+      valid_idx <- !is.na(x_data) & !is.na(y_data)
+      x_data <- x_data[valid_idx]
+      y_data <- y_data[valid_idx]
+      
+      if (length(x_data) < 2) {
+        return(plotly::plot_ly() %>%
+                 plotly::layout(
+                   title = "Insufficient data to plot",
+                   xaxis = list(title = "Temperature ( deg C)"),
+                   yaxis = list(title = y_label)
+                 ))
+      }
+      
+      p <- plotly::plot_ly(source = "thermogram_plot")
+      p <- plotly::event_register(p, 'plotly_click')  # Register event EARLY
+      
+      p <- p %>%
+        plotly::add_trace(
+          x = x_data,
+          y = y_data,
+          type = "scatter",
+          mode = "lines",
+          line = list(color = "#1f77b4", width = 2),
+          name = "Thermogram",
+          hovertemplate = paste(
+            "<b>Temperature:</b> %{x:.1f} deg C<br>",
+            "<b>", y_label, ":</b> %{y:.3f}<br>",
+            "<extra></extra>"
+          )
+        )
+      
+      # FIXED: Add endpoint lines for BOTH views
+      y_min <- min(y_data, na.rm = TRUE)
+      y_max <- max(y_data, na.rm = TRUE)
+      
+      lower_endpoint <- as.numeric(sample$lower_endpoint)
+      upper_endpoint <- as.numeric(sample$upper_endpoint)
+      
+      if (current_view == "baseline_subtracted") {
+        p <- p %>%
+          plotly::add_trace(
+            x = c(lower_endpoint, upper_endpoint, upper_endpoint, lower_endpoint),
+            y = c(y_min, y_min, y_max, y_max),
+            type = "scatter",
+            mode = "none",
+            fill = "toself",
+            fillcolor = "rgba(200, 200, 200, 0.1)",
+            name = "Transition Region",
+            showlegend = FALSE,
+            hoverinfo = "skip"
+          )
+      }
+      
+      # Add endpoint lines (visible in both views)
+      p <- p %>%
+        plotly::add_trace(
+          x = rep(lower_endpoint, 2),
+          y = c(y_min, y_max),
+          type = "scatter",
+          mode = "lines",
+          line = list(color = "#2ca02c", width = 2, dash = "dash"),
+          name = "Lower Endpoint",
+          showlegend = TRUE,
+          hoverinfo = "skip"
+        ) %>%
+        plotly::add_trace(
+          x = rep(upper_endpoint, 2),
+          y = c(y_min, y_max),
+          type = "scatter",
+          mode = "lines",
+          line = list(color = "#9467bd", width = 2, dash = "dash"),
+          name = "Upper Endpoint",
+          showlegend = TRUE,
+          hoverinfo = "skip"
+        )
+      
+      plot_bg <- "#ffffff"
+      if (!is.null(adjustment_mode())) {
+        plot_bg <- "#fffef0"
+      }
+      
+      p <- p %>%
+        plotly::layout(
+          title = NULL,
+          xaxis = list(title = "Temperature ( deg C)", gridcolor = "#dee2e6", showgrid = TRUE),
+          yaxis = list(title = y_label, gridcolor = "#dee2e6", showgrid = TRUE),
+          hovermode = "closest",
+          plot_bgcolor = plot_bg,
+          paper_bgcolor = "#ffffff",
+          legend = list(
+            x = 0.02, y = 0.98,
+            bgcolor = "rgba(255, 255, 255, 0.8)",
+            bordercolor = "#dee2e6",
+            borderwidth = 1
+          ),
+          dragmode = "pan"
+        ) %>%
+        plotly::config(
+          displayModeBar = TRUE,
+          modeBarButtonsToRemove = c("lasso2d", "select2d"),
+          displaylogo = FALSE
+        )
+      
+      p
+    })
+    
+    # =========================================================================
+    # PLOT CLICK HANDLER WITH CRASH PROTECTION
+    # =========================================================================
+    
+    observeEvent(plotly::event_data("plotly_click", source = "thermogram_plot"), {
+      click <- plotly::event_data("plotly_click", source = "thermogram_plot")
+      
+      if (is.null(click)) return()
+      
+      # FIXED: Protect against NULL or empty adjustment_mode
+      mode <- adjustment_mode()
+      if (is.null(mode) || length(mode) == 0) {
+        cat("[CLICK] No adjustment mode set - ignoring click\n")
+        return()
+      }
+      
+      if (is.null(selected_sample())) return()
+      if (is.na(click$x) || length(click$x) == 0) return()
+      
+      clicked_temp <- as.numeric(click$x)
+      if (is.na(clicked_temp)) return()
+      
+      click_key <- paste(mode, clicked_temp, Sys.time())
+      
+      if (!is.null(last_click_key()) && last_click_key() == click_key) {
+        cat("[CLICK] Duplicate click ignored\n")
+        return()
+      }
+      
+      # FIXED: Set processing flag
+      processing_adjustment(TRUE)
+      
+      last_click_key(click_key)
+      
+      sample <- app_data$processed_data$samples[[selected_sample()]]
+      
+      cat(sprintf("\n[CLICK] Processing %s endpoint at %.2f deg C\n", mode, clicked_temp))
+      
+      # FIXED: More robust endpoint validation
+      lower_ep <- sample$lower_endpoint
+      upper_ep <- sample$upper_endpoint
+      
+      # Check for NULL or invalid endpoints
+      if (is.null(lower_ep) || length(lower_ep) == 0 || is.na(lower_ep)) {
+        cat("[CLICK] ERROR: Invalid lower_endpoint\n")
+        showNotification("Error: Invalid lower endpoint value", type = "error", duration = 3)
+        adjustment_mode(NULL)
+        processing_adjustment(FALSE)
+        return()
+      }
+      
+      if (is.null(upper_ep) || length(upper_ep) == 0 || is.na(upper_ep)) {
+        cat("[CLICK] ERROR: Invalid upper_endpoint\n")
+        showNotification("Error: Invalid upper endpoint value", type = "error", duration = 3)
+        adjustment_mode(NULL)
+        processing_adjustment(FALSE)
+        return()
+      }
+      
+      lower_ep <- as.numeric(lower_ep)
+      upper_ep <- as.numeric(upper_ep)
+      
+      cat(sprintf("[CLICK] Current endpoints - lower: %.2f, upper: %.2f\n", lower_ep, upper_ep))
+      
+      if (mode == "lower" && clicked_temp >= upper_ep) {
+        showNotification(
+          "Lower endpoint must be less than upper endpoint",
+          type = "error",
+          duration = 3
+        )
+        processing_adjustment(FALSE)
+        return()
+      }
+      
+      if (mode == "upper" && clicked_temp <= lower_ep) {
+        showNotification(
+          "Upper endpoint must be greater than lower endpoint",
+          type = "error",
+          duration = 3
+        )
+        processing_adjustment(FALSE)
+        return()
+      }
+      
+      # Store auto endpoints before first manual adjustment
+      if (is.null(sample$lower_endpoint_auto)) {
+        app_data$processed_data$samples[[selected_sample()]]$lower_endpoint_auto <- sample$lower_endpoint
+        app_data$processed_data$samples[[selected_sample()]]$upper_endpoint_auto <- sample$upper_endpoint
+        cat("[STORE] Saved original auto endpoints for future discard\n")
+      }
+      
+      previous_state <- capture_sample_state(selected_sample())
+      
+      # FIXED: Use validated endpoint values
+      new_lower <- if (mode == "lower") clicked_temp else lower_ep
+      new_upper <- if (mode == "upper") clicked_temp else upper_ep
+      
+      cat(sprintf("[CLICK] New endpoints will be - lower: %.2f, upper: %.2f\n", new_lower, new_upper))
+      
+      result <- reprocess_with_manual_endpoints(
+        temperature = sample$temperature_original,
+        dcp = sample$dcp_original,
+        lower_endpoint = new_lower,
+        upper_endpoint = new_upper
+      )
+      
+      if (result$success) {
+        push_undo_state(
+          sample_id = selected_sample(),
+          action_type = paste0("adjust_", mode),
+          previous_state = previous_state
+        )
+        
+        isolate({
+          app_data$processed_data$samples[[selected_sample()]]$lower_endpoint <- result$lower_endpoint
+          app_data$processed_data$samples[[selected_sample()]]$upper_endpoint <- result$upper_endpoint
+          app_data$processed_data$samples[[selected_sample()]]$baseline_subtracted <- result$baseline_subtracted
+          app_data$processed_data$samples[[selected_sample()]]$manual_adjustment <- TRUE
+          
+          if (!is.null(result$has_signal)) {
+            app_data$processed_data$samples[[selected_sample()]]$has_signal <- result$has_signal
+            cat(sprintf("[ADJUST] Updated signal for sample: has_signal=%s\n", result$has_signal))
+          }
+          
+          if (mode == "lower") {
+            app_data$processed_data$samples[[selected_sample()]]$lower_manual <- TRUE
+          } else {
+            app_data$processed_data$samples[[selected_sample()]]$upper_manual <- TRUE
+          }
+        })
+        
+        programmatic_selection(TRUE)
+        grid_data <- sample_grid_data()
+        current_idx <- which(grid_data[[1]] == selected_sample())
+        
+        proxy <- DT::dataTableProxy("sample_grid")
+        DT::replaceData(proxy = proxy, data = grid_data, 
+                        resetPaging = FALSE, rownames = FALSE, clearSelection = FALSE)
+        
+        if (length(current_idx) > 0) {
+          shinyjs::delay(50, {
+            DT::selectRows(proxy, current_idx[1])
+          })
+        }
+        
+        shinyjs::delay(100, { programmatic_selection(FALSE) })
+        
+        adjustment_mode(NULL)
+        
+        # FIXED: Clear processing flag after delay to allow UI to settle
+        shinyjs::delay(200, { processing_adjustment(FALSE) })
+        
+        showNotification(
+          sprintf("%s endpoint updated to %.1f deg C", 
+                  tools::toTitleCase(mode), result[[paste0(mode, "_endpoint")]]),
+          type = "message",
+          duration = 2
+        )
+      } else {
+        processing_adjustment(FALSE)
+        showNotification(
+          paste("Failed to update endpoint:", result$message),
+          type = "error",
+          duration = 5
+        )
+      }
+    })
+    
+    # =========================================================================
+    # REVIEW CONTROLS
+    # =========================================================================
+    
+    output$review_controls <- renderUI({
+      req(selected_sample())
+      req(app_data$processed_data)
+      
+      sample <- app_data$processed_data$samples[[selected_sample()]]
+      
+      # -----------------------------------------------------------------------
+      # Setup reactive values and flags
+      # -----------------------------------------------------------------------
+      reviewed_value <- if(is.null(sample$reviewed)) FALSE else sample$reviewed
+      excluded_value <- if(is.null(sample$excluded)) FALSE else sample$excluded
+      
+      updating_checkboxes(TRUE)
+      last_reviewed_value(reviewed_value)
+      last_excluded_value(excluded_value)
+      shinyjs::delay(150, { updating_checkboxes(FALSE) })
+      
+      lower_manual <- if(is.null(sample$lower_manual)) FALSE else sample$lower_manual
+      upper_manual <- if(is.null(sample$upper_manual)) FALSE else sample$upper_manual
+      
+      # -----------------------------------------------------------------------
+      # Create status badges (Auto vs Manual)
+      # -----------------------------------------------------------------------
+      lower_badge <- if (lower_manual) {
+        span(
+          icon("hand-pointer"), 
+          " Manual", 
+          class = "badge bg-warning text-dark", 
+          style = "font-size: 0.7rem; padding: 0.35rem 0.5rem;"
+        )
+      } else {
+        span(
+          icon("robot"), 
+          " Auto", 
+          class = "badge bg-info", 
+          style = "font-size: 0.7rem; padding: 0.35rem 0.5rem;"
+        )
+      }
+      
+      upper_badge <- if (upper_manual) {
+        span(
+          icon("hand-pointer"), 
+          " Manual", 
+          class = "badge bg-warning text-dark", 
+          style = "font-size: 0.7rem; padding: 0.35rem 0.5rem;"
+        )
+      } else {
+        span(
+          icon("robot"), 
+          " Auto", 
+          class = "badge bg-info", 
+          style = "font-size: 0.7rem; padding: 0.35rem 0.5rem;"
+        )
+      }
+      
+      # -----------------------------------------------------------------------
+      # Build main UI structure
+      # -----------------------------------------------------------------------
+      tagList(
+        # =================================================================
+        # SECTION 1: Sample Header - Enhanced Visual Design
+        # =================================================================
+        div(
+          class = "p-3 border-bottom",
+          style = "background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); border-radius: 0.25rem 0.25rem 0 0; border-top: 4px solid #0d6efd;",
+          
+          # Header row with sample info and status badges
+          div(
+            class = "d-flex justify-content-between align-items-center mb-2",
+            
+            # Left: Sample ID section with icon
+            div(
+              class = "d-flex align-items-center gap-2",
+              div(
+                div(
+                  span("Sample ID", class = "d-block text-muted small fw-semibold", style = "letter-spacing: 0.5px;"),
+                  span(selected_sample(), class = "d-block fs-5 fw-bold text-dark", style = "font-family: monospace; letter-spacing: 1px; margin-top: 0.25rem;")
+                )
+              )
+            ),
+            
+            # Right: Status badges with toggle buttons
+            div(
+              class = "d-flex gap-2",
+              
+              # Reviewed toggle button
+              actionButton(
+                ns("reviewed_toggle"),
+                span(icon("check-circle"), " Reviewed"),
+                class = if(reviewed_value) "btn btn-sm btn-info" else "btn btn-sm btn-outline-secondary",
+                style = "padding: 0.4rem 0.75rem; font-size: 0.9rem; min-width: 110px; transition: all 0.15s ease-in-out;",
+                title = "Toggle reviewed status"
+              ),
+              
+              # Exclude toggle button
+              actionButton(
+                ns("excluded_toggle"),
+                span(icon("ban"), " Exclude"),
+                class = if(excluded_value) "btn btn-sm btn-danger" else "btn btn-sm btn-outline-secondary",
+                style = "padding: 0.4rem 0.75rem; font-size: 0.9rem; min-width: 110px; transition: all 0.15s ease-in-out;",
+                title = "Toggle exclusion status"
+              )
+            )
+          )
+        ),
+        
+        # =================================================================
+        # SECTION 2: Endpoints Control Panel
+        # =================================================================
+        div(
+          class = "p-3 border-bottom",
+          style = "background-color: #f8f9fa;",
+          
+          # Lower endpoint
+          div(
+            class = "row g-2 mb-3",
+            div(
+              class = "col-md-6",
+              div(
+                class = "d-flex align-items-center justify-content-between p-2",
+                style = "background-color: white; border-radius: 0.25rem; border-left: 4px solid #2ca02c;",
+                
+                # Left side: Label and value
+                div(
+                  class = "flex-grow-1",
+                  div(
+                    span("Lower Endpoint", class = "d-block text-muted small fw-semibold"),
+                    div(
+                      class = "d-flex align-items-center gap-2 mt-1",
+                      span(sprintf("%.2f deg C", sample$lower_endpoint), 
+                           class = "fs-5 fw-bold",
+                           style = "color: #2ca02c;"),
+                      lower_badge
+                    )
+                  )
+                ),
+                
+                # Right side: Action button
+                actionButton(
+                  ns("adjust_lower"),
+                  span(icon("pencil-alt"), " Adjust"),
+                  class = "btn btn-sm btn-outline-secondary flex-shrink-0",
+                  style = "padding: 0.35rem 0.75rem; font-size: 0.85rem; border-color: #2ca02c; color: #2ca02c;",
+                  disabled = !is.null(adjustment_mode()),
+                  title = "Click to manually adjust lower endpoint"
+                )
+              )
+            ),
+            
+            # Upper endpoint
+            div(
+              class = "col-md-6",
+              div(
+                class = "d-flex align-items-center justify-content-between p-2",
+                style = "background-color: white; border-radius: 0.25rem; border-left: 4px solid #9467bd;",
+                
+                # Left side: Label and value
+                div(
+                  class = "flex-grow-1",
+                  div(
+                    span("Upper Endpoint", class = "d-block text-muted small fw-semibold"),
+                    div(
+                      class = "d-flex align-items-center gap-2 mt-1",
+                      span(sprintf("%.2f deg C", sample$upper_endpoint), 
+                           class = "fs-5 fw-bold",
+                           style = "color: #9467bd;"),
+                      upper_badge
+                    )
+                  )
+                ),
+                
+                # Right side: Action button
+                actionButton(
+                  ns("adjust_upper"),
+                  span(icon("pencil-alt"), " Adjust"),
+                  class = "btn btn-sm btn-outline-secondary flex-shrink-0",
+                  style = "padding: 0.35rem 0.75rem; font-size: 0.85rem; border-color: #9467bd; color: #9467bd;",
+                  disabled = !is.null(adjustment_mode()),
+                  title = "Click to manually adjust upper endpoint"
+                )
+              )
+            )
+          ),
+          
+          # Discard changes button (conditional)
+          if (lower_manual || upper_manual) {
+            div(
+              class = "alert alert-warning d-flex align-items-center gap-2 mb-0",
+              style = "padding: 0.5rem 0.75rem;",
+              
+              icon("exclamation-triangle"),
+              
+              actionButton(
+                ns("discard_changes"),
+                "Discard Manual Changes",
+                icon = icon("undo"),
+                class = "btn btn-sm btn-outline-warning ms-auto",
+                style = "padding: 0.25rem 0.5rem; font-size: 0.8rem;"
+              )
+            )
+          }
+        ),
+        
+        # =================================================================
+        # SECTION 3: Navigation & History Controls
+        # =================================================================
+        div(
+          class = "d-flex justify-content-between align-items-center p-2",
+          style = "background-color: #ffffff; border-radius: 0 0 0.25rem 0.25rem;",
+          
+          # Navigation arrows
+          div(
+            class = "btn-group btn-group-sm",
+            role = "group",
+            
+            actionButton(
+              ns("prev_sample"), 
+              icon("arrow-left"), 
+              class = "btn btn-outline-secondary",
+              title = "Previous sample"
+            ),
+            
+            actionButton(
+              ns("next_sample"), 
+              icon("arrow-right"), 
+              class = "btn btn-outline-secondary",
+              title = "Next sample"
+            )
+          ),
+          
+          # Undo/Redo controls
+          div(
+            class = "btn-group btn-group-sm",
+            role = "group",
+            
+            actionButton(
+              ns("undo_btn"),
+              icon("undo"),
+              class = if (can_undo()) "btn btn-outline-secondary" else "btn btn-outline-secondary disabled",
+              title = "Undo last change"
+            ),
+            
+            actionButton(
+              ns("redo_btn"),
+              icon("redo"),
+              class = if (can_redo()) "btn btn-outline-secondary" else "btn btn-outline-secondary disabled",
+              title = "Redo last change"
+            )
+          )
+        )
+      )
+    })
+    
+    # =========================================================================
+    # TOGGLE BUTTON HANDLERS
+    # =========================================================================
+    
+    observeEvent(input$reviewed_toggle, {
+      req(selected_sample())
+      
+      if (isolate(updating_checkboxes())) {
+        cat("[BUTTON] Blocked - UI is updating\n")
+        return()
+      }
+      
+      current_sample_id <- isolate(selected_sample())
+      
+      if (isolate(programmatic_selection())) {
+        cat(sprintf("[BUTTON] Ignoring reviewed_toggle - programmatic for %s\n", current_sample_id))
+        return()
+      }
+      
+      # Toggle the value
+      current_value <- isolate(last_reviewed_value())
+      new_value <- !current_value
+      
+      cat(sprintf("[BUTTON] Processing reviewed_toggle: sample=%s, old=%s, new=%s\n",
+                  current_sample_id, current_value, new_value))
+      
+      previous_state <- capture_sample_state(current_sample_id)
+      
+      push_undo_state(
+        sample_id = current_sample_id,
+        action_type = "review_status",
+        previous_state = previous_state
+      )
+      
+      updating_from_checkbox(TRUE)
+      programmatic_selection(TRUE)
+      
+      isolate({
+        app_data$processed_data$samples[[current_sample_id]]$reviewed <- new_value
+        last_reviewed_value(new_value)
+        cat(sprintf("[DATA] Updated sample %s reviewed=%s\n", current_sample_id, new_value))
+      })
+      
+      updated_grid_data <- isolate(sample_grid_data())
+      current_idx <- which(updated_grid_data[[1]] == current_sample_id)
+      
+      if (length(current_idx) > 0) {
+        proxy <- DT::dataTableProxy("sample_grid")
+        DT::replaceData(proxy = proxy, data = updated_grid_data, 
+                        resetPaging = FALSE, rownames = FALSE, clearSelection = FALSE)
+        
+        shinyjs::delay(50, {
+          DT::selectRows(proxy, current_idx[1])
+        })
+      }
+      
+      shinyjs::delay(150, {
+        programmatic_selection(FALSE)
+        updating_from_checkbox(FALSE)
+      })
+      
+      showNotification(
+        sprintf("Sample %s marked as %s", 
+                current_sample_id, 
+                if(new_value) "reviewed" else "not reviewed"),
+        type = "message",
+        duration = 2
+      )
+      
+    }, priority = 10, ignoreInit = TRUE)
+    
+    # =========================================================================
+    # EXCLUDED TOGGLE BUTTON HANDLER
+    # =========================================================================
+    observeEvent(input$excluded_toggle, {
+      req(selected_sample())
+      
+      if (isolate(updating_checkboxes())) {
+        cat("[BUTTON] Blocked - UI is updating\n")
+        return()
+      }
+      
+      current_sample_id <- isolate(selected_sample())
+      
+      if (isolate(programmatic_selection())) {
+        cat(sprintf("[BUTTON] Ignoring excluded_toggle - programmatic for %s\n", current_sample_id))
+        return()
+      }
+      
+      # Toggle the value
+      current_value <- isolate(last_excluded_value())
+      new_value <- !current_value
+      
+      cat(sprintf("[BUTTON] Processing excluded_toggle: sample=%s, old=%s, new=%s\n",
+                  current_sample_id, current_value, new_value))
+      
+      previous_state <- capture_sample_state(current_sample_id)
+      
+      push_undo_state(
+        sample_id = current_sample_id,
+        action_type = "review_status",
+        previous_state = previous_state
+      )
+      
+      updating_from_checkbox(TRUE)
+      programmatic_selection(TRUE)
+      
+      isolate({
+        app_data$processed_data$samples[[current_sample_id]]$excluded <- new_value
+        last_excluded_value(new_value)
+        cat(sprintf("[DATA] Updated sample %s excluded=%s\n", current_sample_id, new_value))
+      })
+      
+      updated_grid_data <- isolate(sample_grid_data())
+      current_idx <- which(updated_grid_data[[1]] == current_sample_id)
+      
+      if (length(current_idx) > 0) {
+        proxy <- DT::dataTableProxy("sample_grid")
+        DT::replaceData(proxy = proxy, data = updated_grid_data,
+                        resetPaging = FALSE, rownames = FALSE, clearSelection = FALSE)
+        
+        shinyjs::delay(50, {
+          DT::selectRows(proxy, current_idx[1])
+        })
+      }
+      
+      shinyjs::delay(150, {
+        programmatic_selection(FALSE)
+        updating_from_checkbox(FALSE)
+      })
+      
+      showNotification(
+        sprintf("Sample %s %s from analysis", 
+                current_sample_id, 
+                if(new_value) "excluded" else "included"),
+        type = "message",
+        duration = 2
+      )
+      
+    }, priority = 10, ignoreInit = TRUE)
+    
+    # =========================================================================
+    # ADJUSTMENT BUTTON HANDLERS WITH PROTECTION
+    # =========================================================================
+    
+    observeEvent(input$adjust_lower, {
+      # FIXED: Block during updates
+      if (isolate(updating_checkboxes())) {
+        cat("[BUTTON] Ignoring adjust_lower - UI updating\n")
+        return()
+      }
+      if (isolate(programmatic_selection())) {
+        cat("[BUTTON] Ignoring adjust_lower - programmatic\n")
+        return()
+      }
+      if (isolate(updating_from_checkbox())) {
+        cat("[BUTTON] Ignoring adjust_lower - checkbox update\n")
+        return()
+      }
+      if (isolate(processing_adjustment())) {
+        cat("[BUTTON] Ignoring adjust_lower - already processing\n")
+        return()
+      }
+      
+      cat("\n[BUTTON] Adjust Lower clicked\n")
+      adjustment_mode("lower")
+      last_click_key(NULL)
+    }, ignoreInit = TRUE, priority = 10)
+    
+    observeEvent(input$adjust_upper, {
+      # FIXED: Block during updates
+      if (isolate(updating_checkboxes())) {
+        cat("[BUTTON] Ignoring adjust_upper - UI updating\n")
+        return()
+      }
+      if (isolate(programmatic_selection())) {
+        cat("[BUTTON] Ignoring adjust_upper - programmatic\n")
+        return()
+      }
+      if (isolate(updating_from_checkbox())) {
+        cat("[BUTTON] Ignoring adjust_upper - checkbox update\n")
+        return()
+      }
+      if (isolate(processing_adjustment())) {
+        cat("[BUTTON] Ignoring adjust_upper - already processing\n")
+        return()
+      }
+      
+      cat("\n[BUTTON] Adjust Upper clicked\n")
+      adjustment_mode("upper")
+      last_click_key(NULL)
+    }, ignoreInit = TRUE, priority = 10)
+    
+    # =========================================================================
+    # DISCARD CHANGES HANDLER
+    # =========================================================================
+    
+    observeEvent(input$discard_changes, {
+      req(selected_sample())
       showModal(
         modalDialog(
-          title = tagList(icon("upload"), " Upload Raw Thermogram Data"),
-          size = "l",
-          
-          # ---------------------------------------------------------------------
-          # ROW 1: File Input + Temperature Range
-          # ---------------------------------------------------------------------
-          fluidRow(
-            column(
-              6,
-              fileInput(
-                ns("file_upload"),
-                "Choose CSV or Excel file",
-                accept = c(".csv", ".xlsx", ".xls", ".xlsm"),
-                multiple = FALSE
-              )
-            ),
-            column(
-              3,
-              numericInput(ns("temp_min"), "Min Temp (deg C)", 
-                           value = 20, min = 0, max = 100)
-            ),
-            column(
-              3,
-              numericInput(ns("temp_max"), "Max Temp (deg C)", 
-                           value = 110, min = 0, max = 150)
-            )
-          ),
-          
-          # ---------------------------------------------------------------------
-          # ROW 2: Sheet Selector (conditional - rendered via renderUI)
-          # ---------------------------------------------------------------------
-          uiOutput(ns("sheet_selector_ui")),
-          
-          # ---------------------------------------------------------------------
-          # ROW 3: Data Preview
-          # ---------------------------------------------------------------------
-          hr(),
-          h5(tagList(icon("table"), " Data Preview"), class = "mt-3"),
-          uiOutput(ns("preview_section_ui")),
-          
-          # ---------------------------------------------------------------------
-          # ROW 4: Advanced Options (collapsible)
-          # ---------------------------------------------------------------------
-          hr(),
-          actionLink(ns("toggle_advanced"), 
-                     tagList(icon("cog"), " Advanced Options"), 
-                     class = "text-secondary"),
-          
-          shinyjs::hidden(
-            div(
-              id = ns("advanced_options"),
-              class = "mt-3 p-3 border rounded bg-light",
-              h6("Baseline Detection Parameters"),
-              
-              fluidRow(
-                column(6, 
-                       numericInput(ns("window_size"), "Window Size (points)", 
-                                    value = 90, min = 30, max = 200),
-                       tags$small(class = "form-text text-muted", "Rolling variance window")
-                ),
-                column(6, 
-                       selectInput(ns("point_selection"), "Endpoint Selection",
-                                   choices = c("Innermost" = "innermost", 
-                                               "Outermost" = "outermost", 
-                                               "Middle" = "middle"), 
-                                   selected = "innermost"),
-                       tags$small(class = "form-text text-muted", "Selection strategy")
-                )
-              ),
-              
-              fluidRow(
-                column(6, 
-                       numericInput(ns("exclusion_lower"), "Exclusion Lower (deg C)", 
-                                    value = 60, min = 40, max = 80),
-                       tags$small(class = "form-text text-muted", "Lower bound of transition")
-                ),
-                column(6, 
-                       numericInput(ns("exclusion_upper"), "Exclusion Upper (deg C)", 
-                                    value = 80, min = 60, max = 95),
-                       tags$small(class = "form-text text-muted", "Upper bound of transition")
-                )
-              ),
-              
-              fluidRow(
-                column(6, 
-                       numericInput(ns("grid_resolution"), "Grid Resolution (deg C)", 
-                                    value = 0.1, min = 0.01, max = 1.0, step = 0.05),
-                       tags$small(class = "form-text text-muted", "Temperature step")
-                )
-              )
-            )
-          ),
-          
-          # ---------------------------------------------------------------------
-          # Footer: Cancel and Upload buttons
-          # ---------------------------------------------------------------------
+          title = tagList(icon("exclamation-triangle"), " Discard Manual Changes?"),
+          "This will revert to automatically detected endpoints. Are you sure?",
           footer = tagList(
             modalButton("Cancel"),
-            actionButton(ns("confirm_upload"), "Upload Data", 
-                         class = "btn-primary", icon = icon("check"))
+            actionButton(ns("confirm_discard"), "Discard Changes", class = "btn-danger")
           ),
           easyClose = FALSE
         )
       )
-      
-    }, ignoreInit = TRUE)
-    
-    
-    # =========================================================================
-    # SECTION 2: FILE UPLOAD AND SHEET DETECTION
-    # =========================================================================
-    # When a file is uploaded, detect if it's Excel and enumerate sheets.
-    # =========================================================================
-    
-    observeEvent(input$file_upload, {
-      
-      cat("\n")
-      cat("----------------------------------------\n")
-      cat("[UPLOAD_MODAL] File upload detected\n")
-      cat("----------------------------------------\n")
-      
-      # Reset state when no file
-      if (is.null(input$file_upload)) {
-        cat("[UPLOAD_MODAL] No file - resetting state\n")
-        excel_sheets(NULL)
-        selected_sheet(NULL)
-        return()
-      }
-      
-      file_info <- input$file_upload
-      cat(sprintf("[UPLOAD_MODAL] File name: %s\n", file_info$name))
-      cat(sprintf("[UPLOAD_MODAL] File size: %d bytes\n", file_info$size))
-      
-      # Check if Excel file
-      is_excel <- grepl("\\.(xlsx|xls|xlsm)$", file_info$name, ignore.case = TRUE)
-      cat(sprintf("[UPLOAD_MODAL] Is Excel: %s\n", is_excel))
-      
-      if (is_excel) {
-        # Detect sheets in Excel file
-        tryCatch({
-          sheets <- readxl::excel_sheets(file_info$datapath)
-          cat(sprintf("[UPLOAD_MODAL] Found %d sheet(s): %s\n", 
-                      length(sheets), paste(sheets, collapse = ", ")))
-          
-          excel_sheets(sheets)
-          
-          # Auto-select first sheet
-          if (length(sheets) > 0) {
-            selected_sheet(sheets[1])
-            cat(sprintf("[UPLOAD_MODAL] Auto-selected: '%s'\n", sheets[1]))
-          }
-          
-        }, error = function(e) {
-          cat(sprintf("[UPLOAD_MODAL] ERROR reading sheets: %s\n", e$message))
-          excel_sheets(NULL)
-          selected_sheet(NULL)
-        })
-        
-      } else {
-        # CSV file - no sheets
-        cat("[UPLOAD_MODAL] CSV file - no sheets\n")
-        excel_sheets(NULL)
-        selected_sheet(NULL)
-      }
-      
-      cat("----------------------------------------\n\n")
-      
-    }, ignoreNULL = FALSE)
-    
-    
-    # =========================================================================
-    # SECTION 3: SHEET SELECTOR UI
-    # =========================================================================
-    # Renders a dropdown for sheet selection when multiple sheets detected.
-    # =========================================================================
-    
-    output$sheet_selector_ui <- renderUI({
-      
-      sheets <- excel_sheets()
-      
-      cat(sprintf("[UPLOAD_MODAL:SHEET_UI] sheets = %s\n",
-                  if (is.null(sheets)) "NULL" else paste(sheets, collapse = ", ")))
-      
-      # Only show dropdown for multi-sheet Excel files
-      if (!is.null(sheets) && length(sheets) > 1) {
-        cat(sprintf("[UPLOAD_MODAL:SHEET_UI] Rendering dropdown (%d sheets)\n", 
-                    length(sheets)))
-        
-        div(
-          class = "alert alert-info mt-2 mb-2",
-          style = "padding: 0.75rem 1rem;",
-          div(
-            icon("layer-group"), " ",
-            strong("Multiple sheets detected."),
-            " Select which sheet contains your data:"
-          ),
-          selectInput(
-            ns("sheet_selector"),
-            label = NULL,
-            choices = sheets,
-            selected = sheets[1],
-            width = "100%"
-          )
-        )
-        
-      } else if (!is.null(sheets) && length(sheets) == 1) {
-        # Single sheet - show confirmation message
-        cat(sprintf("[UPLOAD_MODAL:SHEET_UI] Single sheet: '%s'\n", sheets[1]))
-        
-        div(
-          class = "alert alert-success mt-2 mb-2",
-          style = "padding: 0.5rem 1rem;",
-          icon("check-circle"), " ",
-          sprintf("Using sheet: '%s'", sheets[1])
-        )
-        
-      } else {
-        # CSV or no file - no selector needed
-        cat("[UPLOAD_MODAL:SHEET_UI] No selector needed\n")
-        NULL
-      }
     })
     
-    
-    # =========================================================================
-    # SECTION 4: SHEET SELECTION HANDLER
-    # =========================================================================
-    
-    observeEvent(input$sheet_selector, {
-      req(input$sheet_selector)
-      cat(sprintf("[UPLOAD_MODAL] Sheet selected: '%s'\n", input$sheet_selector))
-      selected_sheet(input$sheet_selector)
-    }, ignoreInit = TRUE)
-    
-    
-    # =========================================================================
-    # SECTION 5: PREVIEW DATA (Reactive)
-    # =========================================================================
-    
-    preview_data <- reactive({
+    observeEvent(input$confirm_discard, {
+      sample_id <- selected_sample()
+      sample <- app_data$processed_data$samples[[sample_id]]
       
-      req(input$file_upload)
+      cat(sprintf("[DISCARD] Attempting to discard for sample %s\n", sample_id))
       
-      file_info <- input$file_upload
-      sheet <- selected_sheet()
-      
-      cat(sprintf("[UPLOAD_MODAL:PREVIEW] File: %s, Sheet: %s\n",
-                  file_info$name, if (is.null(sheet)) "NULL" else sheet))
-      
-      tryCatch({
-        # Read based on file type
-        if (grepl("\\.csv$", file_info$name, ignore.case = TRUE)) {
-          data <- readr::read_csv(file_info$datapath, 
-                                  show_col_types = FALSE,
-                                  n_max = 100)
+      if (!is.null(sample$lower_endpoint_auto) && !is.null(sample$upper_endpoint_auto)) {
+        cat(sprintf("[DISCARD] Found auto endpoints: lower=%.1f, upper=%.1f\n", 
+                    sample$lower_endpoint_auto, sample$upper_endpoint_auto))
+        
+        previous_state <- capture_sample_state(sample_id)
+        
+        push_undo_state(
+          sample_id = sample_id,
+          action_type = "discard_changes",
+          previous_state = previous_state
+        )
+        
+        result <- reprocess_with_manual_endpoints(
+          temperature = sample$temperature_original,
+          dcp = sample$dcp_original,
+          lower_endpoint = sample$lower_endpoint_auto,
+          upper_endpoint = sample$upper_endpoint_auto
+        )
+        
+        if (result$success) {
+          updating_from_checkbox(TRUE)
+          programmatic_selection(TRUE)
           
-        } else if (grepl("\\.(xlsx|xls|xlsm)$", file_info$name, ignore.case = TRUE)) {
-          if (!is.null(sheet)) {
-            data <- readxl::read_excel(file_info$datapath, sheet = sheet, n_max = 100)
-          } else {
-            data <- readxl::read_excel(file_info$datapath, n_max = 100)
+          isolate({
+            app_data$processed_data$samples[[sample_id]]$lower_endpoint <- result$lower_endpoint
+            app_data$processed_data$samples[[sample_id]]$upper_endpoint <- result$upper_endpoint
+            app_data$processed_data$samples[[sample_id]]$baseline_subtracted <- result$baseline_subtracted
+            
+            # If we're reverting to auto endpoints, re-evaluate signal
+            if (!is.null(result$has_signal)) {
+              app_data$processed_data$samples[[sample_id]]$has_signal <- result$has_signal
+              cat(sprintf("[DISCARD] Restored signal for sample: has_signal=%s\n", result$has_signal))
+            }
+            
+            app_data$processed_data$samples[[sample_id]]$manual_adjustment <- FALSE
+            app_data$processed_data$samples[[sample_id]]$lower_manual <- FALSE
+            app_data$processed_data$samples[[sample_id]]$upper_manual <- FALSE
+          })
+          
+          grid_data <- sample_grid_data()
+          current_idx <- which(grid_data[[1]] == sample_id)
+          
+          proxy <- DT::dataTableProxy("sample_grid")
+          DT::replaceData(proxy = proxy, data = grid_data, 
+                          resetPaging = FALSE, rownames = FALSE, clearSelection = FALSE)
+          
+          if (length(current_idx) > 0) {
+            shinyjs::delay(50, {
+              DT::selectRows(proxy, current_idx[1])
+            })
           }
           
+          shinyjs::delay(150, { 
+            programmatic_selection(FALSE)
+            updating_from_checkbox(FALSE)
+          })
+          
+          cat("[DISCARD] Successfully reverted to auto endpoints\n")
+          
+          showNotification(
+            "Manual changes discarded - reverted to auto-detected endpoints",
+            type = "message",
+            duration = 3
+          )
         } else {
-          return(list(success = FALSE, message = "Unsupported file type"))
+          cat(sprintf("[DISCARD] Reprocessing failed: %s\n", result$message))
+          showNotification(
+            paste("Failed to revert endpoints:", result$message),
+            type = "error",
+            duration = 5
+          )
         }
-        
-        cat(sprintf("[UPLOAD_MODAL:PREVIEW] Read %d rows x %d cols\n", 
-                    nrow(data), ncol(data)))
-        
-        list(
-          success = TRUE,
-          data = head(data, 5),
-          nrow = nrow(data),
-          ncol = ncol(data),
-          filename = file_info$name,
-          sheet = sheet
-        )
-        
-      }, error = function(e) {
-        cat(sprintf("[UPLOAD_MODAL:PREVIEW] ERROR: %s\n", e$message))
-        list(success = FALSE, message = paste("Error reading file:", e$message))
-      })
-    })
-    
-    
-    # =========================================================================
-    # SECTION 6: PREVIEW SECTION UI
-    # =========================================================================
-    
-    output$preview_section_ui <- renderUI({
-      
-      # Check if file is uploaded
-      if (is.null(input$file_upload)) {
-        cat("[UPLOAD_MODAL:PREVIEW_UI] No file - showing placeholder\n")
-        return(
-          div(
-            class = "text-muted py-3 text-center",
-            icon("cloud-upload-alt", class = "fa-2x mb-2"), 
-            br(),
-            "Select a file to see a preview"
-          )
-        )
-      }
-      
-      result <- preview_data()
-      
-      # Handle error
-      if (!result$success) {
-        cat(sprintf("[UPLOAD_MODAL:PREVIEW_UI] Error: %s\n", result$message))
-        return(
-          div(
-            class = "alert alert-danger",
-            icon("exclamation-triangle"), " ", result$message
-          )
-        )
-      }
-      
-      # Build preview
-      cat(sprintf("[UPLOAD_MODAL:PREVIEW_UI] Building table (%d rows)\n", 
-                  nrow(result$data)))
-      
-      # Info message
-      info_parts <- c(
-        sprintf("File: %s", result$filename),
-        sprintf("Rows: %d", result$nrow),
-        sprintf("Columns: %d", result$ncol)
-      )
-      if (!is.null(result$sheet)) {
-        info_parts <- c(info_parts, sprintf("Sheet: '%s'", result$sheet))
-      }
-      info_msg <- paste(info_parts, collapse = " | ")
-      
-      # Build table
-      preview_df <- result$data
-      col_names <- names(preview_df)
-      
-      # Header cells
-      header_cells <- lapply(col_names, function(col) {
-        tags$th(col, 
-                style = "padding: 6px 10px; border: 1px solid #dee2e6; background-color: #f8f9fa; font-size: 0.85em; white-space: nowrap;"
-        )
-      })
-      
-      # Data rows
-      data_rows <- lapply(seq_len(nrow(preview_df)), function(i) {
-        row_cells <- lapply(seq_len(ncol(preview_df)), function(j) {
-          val <- preview_df[[j]][i]
-          cell_text <- if (is.na(val)) "" else as.character(val)
-          tags$td(cell_text, 
-                  style = "padding: 6px 10px; border: 1px solid #dee2e6; font-size: 0.85em;"
-          )
-        })
-        bg_style <- if (i %% 2 == 0) "background-color: #f8f9fa;" else ""
-        tags$tr(style = bg_style, row_cells)
-      })
-      
-      # Return complete preview
-      tagList(
-        div(
-          class = "alert alert-info mb-2",
-          style = "padding: 0.5rem 1rem;",
-          icon("info-circle"), " ", info_msg
-        ),
-        div(
-          style = "overflow-x: auto; max-height: 200px; border: 1px solid #dee2e6; border-radius: 4px;",
-          tags$table(
-            class = "table table-sm mb-0",
-            style = "width: 100%;",
-            tags$thead(
-              style = "position: sticky; top: 0; z-index: 1;",
-              tags$tr(header_cells)
-            ),
-            tags$tbody(data_rows)
-          )
-        ),
-        tags$small(
-          class = "text-muted",
-          sprintf("Showing first %d of %d rows", nrow(preview_df), result$nrow)
-        )
-      )
-    })
-    
-    
-    # =========================================================================
-    # SECTION 7: ADVANCED OPTIONS TOGGLE
-    # =========================================================================
-    
-    observeEvent(input$toggle_advanced, {
-      shinyjs::toggle("advanced_options")
-    })
-    
-    
-    # =========================================================================
-    # SECTION 8: CONFIRM UPLOAD
-    # =========================================================================
-    
-    observeEvent(input$confirm_upload, {
-      
-      req(input$file_upload)
-      
-      file_info <- input$file_upload
-      sheet <- selected_sheet()
-      
-      cat("\n")
-      cat("========================================\n")
-      cat("[UPLOAD_MODAL] CONFIRM UPLOAD\n")
-      cat(sprintf("[UPLOAD_MODAL] File: %s\n", file_info$name))
-      cat(sprintf("[UPLOAD_MODAL] Sheet: %s\n", if (is.null(sheet)) "NULL" else sheet))
-      cat(sprintf("[UPLOAD_MODAL] Temp: %d - %d\n", input$temp_min, input$temp_max))
-      cat("========================================\n")
-      
-      # Read the full file
-      result <- tryCatch({
-        read_thermogram_file(
-          filepath = file_info$datapath,
-          temp_min = input$temp_min,
-          temp_max = input$temp_max,
-          sheet = sheet
-        )
-      }, error = function(e) {
-        cat(sprintf("[UPLOAD_MODAL] ERROR: %s\n", e$message))
+      } else {
+        cat("[DISCARD] No auto endpoints found - sample was not manually adjusted\n")
         showNotification(
-          sprintf("Error reading file: %s", e$message), 
-          type = "error", 
-          duration = 5
+          "No manual changes to discard",
+          type = "warning",
+          duration = 3
         )
-        return(NULL)
-      })
-      
-      if (is.null(result)) {
-        cat("[UPLOAD_MODAL] Read failed - aborting\n")
-        return()
       }
-      
-      cat(sprintf("[UPLOAD_MODAL] Read %d samples successfully\n", 
-                  result$format_info$n_samples))
-      
-      # Package result for parent
-      upload_result <- list(
-        data = result$data,
-        format_info = result$format_info,
-        file_name = file_info$name,
-        sheet = sheet,
-        params = list(
-          temp_min = input$temp_min,
-          temp_max = input$temp_max,
-          window_size = input$window_size,
-          exclusion_lower = input$exclusion_lower,
-          exclusion_upper = input$exclusion_upper,
-          grid_resolution = input$grid_resolution,
-          point_selection = input$point_selection
-        ),
-        timestamp = Sys.time()
-      )
-      
-      # Update reactive (parent observes this)
-      uploaded_data(upload_result)
-      
-      # Show success
-      success_msg <- sprintf("Uploaded: %s (%d samples)", 
-                             file_info$name, 
-                             result$format_info$n_samples)
-      if (!is.null(sheet)) {
-        success_msg <- paste0(success_msg, sprintf(" [Sheet: '%s']", sheet))
-      }
-      showNotification(success_msg, type = "message", duration = 3)
-      
-      cat("[UPLOAD_MODAL] Complete - closing modal\n")
-      cat("========================================\n\n")
       
       removeModal()
     })
     
+    # =========================================================================
+    # UNDO/REDO HANDLERS
+    # =========================================================================
+    
+    observeEvent(input$undo_btn, {
+      req(can_undo())
+      
+      last_entry <- app_data$undo_stack[[length(app_data$undo_stack)]]
+      app_data$undo_stack <- app_data$undo_stack[-length(app_data$undo_stack)]
+      
+      current_state <- capture_sample_state(last_entry$sample_id)
+      
+      updating_from_checkbox(TRUE)
+      programmatic_selection(TRUE)
+      isolate({ restore_sample_state(last_entry$sample_id, last_entry$previous_state) })
+      
+      redo_entry <- list(
+        sample_id = last_entry$sample_id,
+        action_type = last_entry$action_type,
+        previous_state = current_state,
+        timestamp = Sys.time()
+      )
+      app_data$redo_stack <- c(app_data$redo_stack, list(redo_entry))
+      
+      if (isolate(selected_sample()) != last_entry$sample_id) {
+        selected_sample(last_entry$sample_id)
+      }
+      
+      sample <- app_data$processed_data$samples[[last_entry$sample_id]]
+      last_reviewed_value(if(is.null(sample$reviewed)) FALSE else sample$reviewed)
+      last_excluded_value(if(is.null(sample$excluded)) FALSE else sample$excluded)
+      
+      grid_data <- sample_grid_data()
+      current_idx <- which(grid_data[[1]] == last_entry$sample_id)
+      
+      proxy <- DT::dataTableProxy("sample_grid")
+      DT::replaceData(proxy = proxy, data = grid_data, 
+                      resetPaging = FALSE, rownames = FALSE, clearSelection = FALSE)
+      
+      if (length(current_idx) > 0) {
+        shinyjs::delay(50, {
+          DT::selectRows(proxy, current_idx[1])
+        })
+      }
+      
+      shinyjs::delay(150, { 
+        programmatic_selection(FALSE)
+        updating_from_checkbox(FALSE)
+      })
+      
+      showNotification(
+        sprintf("Undid %s for sample %s", gsub("_", " ", last_entry$action_type), last_entry$sample_id),
+        type = "message", duration = 2
+      )
+    })
+    
+    observeEvent(input$redo_btn, {
+      req(can_redo())
+      
+      last_entry <- app_data$redo_stack[[length(app_data$redo_stack)]]
+      app_data$redo_stack <- app_data$redo_stack[-length(app_data$redo_stack)]
+      
+      current_state <- capture_sample_state(last_entry$sample_id)
+      
+      updating_from_checkbox(TRUE)
+      programmatic_selection(TRUE)
+      isolate({ restore_sample_state(last_entry$sample_id, last_entry$previous_state) })
+      
+      undo_entry <- list(
+        sample_id = last_entry$sample_id,
+        action_type = last_entry$action_type,
+        previous_state = current_state,
+        timestamp = Sys.time()
+      )
+      app_data$undo_stack <- c(app_data$undo_stack, list(undo_entry))
+      
+      if (isolate(selected_sample()) != last_entry$sample_id) {
+        selected_sample(last_entry$sample_id)
+      }
+      
+      sample <- app_data$processed_data$samples[[last_entry$sample_id]]
+      last_reviewed_value(if(is.null(sample$reviewed)) FALSE else sample$reviewed)
+      last_excluded_value(if(is.null(sample$excluded)) FALSE else sample$excluded)
+      
+      grid_data <- sample_grid_data()
+      current_idx <- which(grid_data[[1]] == last_entry$sample_id)
+      
+      proxy <- DT::dataTableProxy("sample_grid")
+      DT::replaceData(proxy = proxy, data = grid_data, 
+                      resetPaging = FALSE, rownames = FALSE, clearSelection = FALSE)
+      
+      if (length(current_idx) > 0) {
+        shinyjs::delay(50, {
+          DT::selectRows(proxy, current_idx[1])
+        })
+      }
+      
+      shinyjs::delay(150, { 
+        programmatic_selection(FALSE)
+        updating_from_checkbox(FALSE)
+      })
+      
+      showNotification(
+        sprintf("Redid %s for sample %s", gsub("_", " ", last_entry$action_type), last_entry$sample_id),
+        type = "message", duration = 2
+      )
+    })
     
     # =========================================================================
-    # RETURN VALUE
+    # NAVIGATION HANDLERS
     # =========================================================================
     
-    return(uploaded_data)
+    observeEvent(input$prev_sample, {
+      req(selected_sample())
+      req(app_data$processed_data)
+      
+      grid_data <- sample_grid_data()
+      current_idx <- which(grid_data[[1]] == selected_sample())
+      
+      if (length(current_idx) > 0 && current_idx[1] > 1) {
+        new_idx <- current_idx[1] - 1
+        programmatic_selection(TRUE)
+        selected_sample(grid_data[[1]][new_idx])
+        
+        sample <- app_data$processed_data$samples[[grid_data[[1]][new_idx]]]
+        last_reviewed_value(if(is.null(sample$reviewed)) FALSE else sample$reviewed)
+        last_excluded_value(if(is.null(sample$excluded)) FALSE else sample$excluded)
+        
+        proxy <- DT::dataTableProxy("sample_grid")
+        DT::selectRows(proxy, new_idx)
+        
+        shinyjs::delay(100, { programmatic_selection(FALSE) })
+      }
+    })
+    
+    observeEvent(input$next_sample, {
+      req(selected_sample())
+      req(app_data$processed_data)
+      
+      grid_data <- sample_grid_data()
+      current_idx <- which(grid_data[[1]] == selected_sample())
+      
+      if (length(current_idx) > 0 && current_idx[1] < nrow(grid_data)) {
+        new_idx <- current_idx[1] + 1
+        programmatic_selection(TRUE)
+        selected_sample(grid_data[[1]][new_idx])
+        
+        sample <- app_data$processed_data$samples[[grid_data[[1]][new_idx]]]
+        last_reviewed_value(if(is.null(sample$reviewed)) FALSE else sample$reviewed)
+        last_excluded_value(if(is.null(sample$excluded)) FALSE else sample$excluded)
+        
+        proxy <- DT::dataTableProxy("sample_grid")
+        DT::selectRows(proxy, new_idx)
+        
+        shinyjs::delay(100, { programmatic_selection(FALSE) })
+      }
+    })
+    
+    # =========================================================================
+    # SAVE PROCESSED DATA
+    # =========================================================================
+    
+    observeEvent(input$save_btn, {
+      req(app_data$processed_data)
+      
+      # Generate default filename with timestamp
+      default_filename <- format(Sys.time(), "thermogram_processed_%Y%m%d_%H%M%S")
+      
+      showModal(
+        modalDialog(
+          title = tagList(icon("save"), " Save Processed Data"),
+          size = "m",
+          
+          textInput(
+            ns("save_filename"),
+            "Filename:",
+            value = default_filename,
+            placeholder = "Enter filename without extension"
+          ),
+          
+          selectInput(
+            ns("save_format"),
+            "Format:",
+            choices = c(
+              "RDS (R Data - Full data, can reload)" = "rds",
+              "CSV (Wide format - Export only)" = "csv",
+              "Excel (Wide format + metadata - Export only)" = "xlsx"
+            ),
+            selected = "rds"
+          ),
+          
+          div(
+            class = "alert alert-info mt-3",
+            icon("info-circle"), 
+            strong(" Format Information:"),
+            tags$ul(
+              tags$li(strong("RDS:"), " Saves complete data including all sample curves, can be reloaded into app"),
+              tags$li(strong("CSV/Excel:"), " Saves wide-format interpolated data (Temperature as columns, samples as rows), cannot be reloaded")
+            )
+          ),
+          
+          footer = tagList(
+            modalButton("Cancel"),
+            actionButton(ns("confirm_save"), "Save", class = "btn-primary", icon = icon("save"))
+          ),
+          easyClose = FALSE
+        )
+      )
+    })
+    
+    observeEvent(input$confirm_save, {
+      filename <- trimws(input$save_filename)
+      format <- input$save_format
+      
+      # Validate filename
+      if (filename == "" || is.null(filename)) {
+        showNotification(
+          "Please enter a filename",
+          type = "error",
+          duration = 3
+        )
+        return()
+      }
+      
+      # Remove any existing extension if user added one
+      filename <- gsub("\\.(rds|csv|xlsx)$", "", filename, ignore.case = TRUE)
+      
+      cat(sprintf("[SAVE] Attempting to save as %s format: %s\n", format, filename))
+      
+      # Call save function from processing_utils.R
+      result <- save_processed_data(
+        data = app_data$processed_data,
+        filename = filename,
+        format = format
+      )
+      
+      if (result$success) {
+        showNotification(
+          result$message,
+          type = "message",
+          duration = 5
+        )
+        cat(sprintf("[SAVE] Success: %s\n", result$filepath))
+      } else {
+        showNotification(
+          result$message,
+          type = "error",
+          duration = 5
+        )
+        cat(sprintf("[SAVE] Failed: %s\n", result$message))
+      }
+      
+      removeModal()
+    })
+    
   })
 }
