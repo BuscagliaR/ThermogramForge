@@ -46,12 +46,19 @@ This application is a complete rewrite of the [Python/Dash ThermogramForge](http
 - ✅ Sample navigation (Previous/Next)
 - ✅ Review status tracking (Reviewed/Exclude checkboxes)
 
+### Report Generation
+- ✅ Comprehensive metric calculation via [tlbparam](https://github.com/BuscagliaR/tlbparam)
+- ✅ Interactive metric selection with 6 categories (24 metrics)
+- ✅ Preview table with calculated results
+- ✅ Export to CSV and Excel formats
+- ✅ Automatic exclusion of marked samples
+
 ### Professional Workflow
 - ✅ Session-based multi-dataset management
 - ✅ Clear status indicators (Unprocessed/Processed/Loaded)
 - ✅ Smart navigation based on data type
 - ✅ Comprehensive file operations (save/load/delete)
-- ✅ Intuitive UI matching Python application design
+- ✅ Built-in User Guide with documentation
 
 ## 🚀 Installation
 
@@ -61,7 +68,6 @@ This application is a complete rewrite of the [Python/Dash ThermogramForge](http
 - **RStudio** (recommended, ≥ 2022.07.0)
 
 ### Install from GitHub
-
 ```r
 # Install remotes if you don't have it
 install.packages("remotes")
@@ -71,7 +77,6 @@ remotes::install_github("BuscagliaR/ThermogramForge")
 ```
 
 ## 💻 Quick Start
-
 ```r
 # Load the package
 library(ThermogramForge)
@@ -101,10 +106,15 @@ The application will open in your default web browser at `http://127.0.0.1:####`
 - Use undo/redo for any mistakes
 - Mark samples as reviewed or excluded
 
-### 4. Save & Generate Reports
+### 4. Generate Reports
+- Click **"Create Reports"** or navigate to the Report Builder tab
+- Select metrics from 6 categories (24 available metrics)
+- Generate and preview calculated metrics
+- Export to CSV or Excel
+
+### 5. Save Your Work
 - Click **"Save Processed Data"** to save your work
 - Choose format: RDS (reloadable), CSV, or Excel (export)
-- Use **"Create Reports"** to generate comprehensive metric reports *(Phase 8)*
 
 ## 📊 Supported Data Formats
 
@@ -126,9 +136,9 @@ Files up to **150MB** are supported.
 | Phase 2 | ✅ Complete | Data loading and validation |
 | Phase 3 | ✅ Complete | Baseline detection and signal quality |
 | Phase 4-6 | ✅ Complete | Interactive review interface |
-| **Phase 7** | ✅ **Complete** | **Multi-dataset management & save/load** |
-| Phase 8 | 🚧 Next | Report builder with tlbparam metrics |
-| Phase 9 | 📋 Planned | Polish and optimization |
+| Phase 7 | ✅ Complete | Multi-dataset management & save/load |
+| **Phase 8** | ✅ **Complete** | **Report builder with tlbparam metrics** |
+| Phase 9 | 🚧 In Progress | Polish and optimization |
 | Phase 10 | 📋 Planned | Documentation and release |
 
 See [NEWS.md](NEWS.md) for detailed version history and [GitHub Issues](https://github.com/BuscagliaR/ThermogramForge/issues) for the development roadmap.
@@ -137,9 +147,8 @@ See [NEWS.md](NEWS.md) for detailed version history and [GitHub Issues](https://
 
 - **[NEWS.md](NEWS.md)** - Version history and changelog
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development guide
-- User Guide - Coming soon
-- Developer Guide - Coming soon
-- API Documentation - Coming soon
+- **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)** - Known issues and workarounds
+- **User Guide** - Available in the app (User Guide tab)
 
 ## 🤝 Contributing
 
@@ -160,10 +169,9 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ## 📄 Citation
 
 If you use ThermogramForge in your research, please cite:
-
 ```bibtex
 @software{thermogramforge_r,
-  author = {Reger, Karl},
+  author = {Reger, Karl and Buscaglia, Robert},
   title = {ThermogramForge: Interactive Thermal Liquid Biopsy Analysis},
   year = {2025},
   url = {https://github.com/BuscagliaR/ThermogramForge},
@@ -174,30 +182,3 @@ If you use ThermogramForge in your research, please cite:
 ## 📜 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-Copyright (c) 2025 Chris Reger and Robert Buscaglia
-
-## 👥 Authors & Acknowledgments
-
-- **Chris Reger** - Lead Developer (kcr28@nau.edu)
-- **Dr. Robert Buscaglia** - Project Advisor
-
-**Institutional Support:**
-- Northern Arizona University
-- Buscaglia Lab
-
-**Technical Foundation:**
-This project builds upon:
-- The Python ThermogramForge implementation
-- ThermogramBaseline R package algorithms
-- tlbparam R package for metric calculations
-
-## 📞 Contact & Support
-
-- **Issues**: [GitHub Issues](https://github.com/BuscagliaR/ThermogramForge/issues)
-- **Email**: kcr28@nau.edu
-- **Repository**: https://github.com/BuscagliaR/ThermogramForge
-
----
-
-**Built with ❤️ using R, Shiny, and the R scientific computing ecosystem**

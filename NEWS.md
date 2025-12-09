@@ -1,5 +1,44 @@
 # ThermogramForge 0.1.0 (Development)
 
+## Phase 8: Report Builder - Complete ✅ (2025-12-09)
+
+### Major Features
+* **tlbparam Integration**
+  - Full integration with tlbparam package for metric calculations
+  - 24 metrics across 6 categories available
+  - Real-time metric calculation with progress feedback
+
+* **Metric Selection UI**
+  - Organized metric selection by category
+  - Select All / Clear All buttons per category
+  - Tooltips explaining each metric on hover
+  - Persistent selections during session
+
+* **Report Generation**
+  - Generate comprehensive metric reports
+  - Preview table with calculated values
+  - Data hash tracking to detect when regeneration needed
+  - Automatic exclusion of samples marked with excluded=TRUE
+
+* **Export Options**
+  - Export to CSV format
+  - Export to Excel format with metadata
+  - Save directly to reports/ directory
+  - Download option for custom locations
+
+* **Dataset Selection**
+  - Choose from all processed datasets in session
+  - Switch between datasets for different reports
+  - Clear status indicators
+
+### Technical Implementation
+* Created mod_report_builder.R module (~500 lines)
+* Integration with tlbparam::clean_thermograms() function
+* MD5 hashing for change detection
+* Comprehensive error handling and user feedback
+
+---
+
 ## Phase 7: Data Management - Complete ✅ (2025-10-15)
 
 ### Major Features
@@ -194,14 +233,7 @@
 
 ## Development Roadmap
 
-### Phase 8: Report Builder (Next - Planned)
-* tlbparam metric calculation integration
-* Report preview functionality
-* Metric selection UI with categories
-* CSV/Excel export from processed datasets
-* Report history and management
-
-### Phase 9: Polish (Planned)
+### Phase 9: Polish (In Progress)
 * Performance optimization (async processing)
 * Enhanced error handling
 * Loading indicators for all long operations
@@ -211,7 +243,7 @@
 * Accessibility improvements
 
 ### Phase 10: Documentation (Planned)
-* Comprehensive user guide
+* Comprehensive user guide vignettes
 * Developer documentation
 * API reference
 * Video tutorials
@@ -222,7 +254,7 @@
 
 ## Contributors
 
-* **Chris Reger** - Lead Developer (kcr28@nau.edu)
+* **Karl Reger** - Lead Developer (kcr28@nau.edu)
 * **Dr. Robert Buscaglia** - Project Advisor
 
 ## Repository
@@ -231,6 +263,6 @@ https://github.com/BuscagliaR/ThermogramForge
 
 ---
 
-**Last Updated:** October 15, 2025  
+**Last Updated:** December 9, 2025  
 **Current Version:** 0.1.0 (Development)  
-**Status:** Phase 7 Complete | Ready for Phase 8
+**Status:** Phase 8 Complete | Phase 9 In Progress
