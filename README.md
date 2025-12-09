@@ -182,3 +182,30 @@ If you use ThermogramForge in your research, please cite:
 ## 📜 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2025 Chris Reger and Robert Buscaglia
+
+## 👥 Authors & Acknowledgments
+
+- **Chris Reger** - Lead Developer (kcr28@nau.edu)
+- **Dr. Robert Buscaglia** - Project Advisor
+
+**Institutional Support:**
+- Northern Arizona University
+- Buscaglia Lab
+
+**Technical Foundation:**
+This project builds upon:
+- The Python ThermogramForge implementation
+- ThermogramBaseline R package algorithms
+- tlbparam R package for metric calculations
+
+## 📞 Contact & Support
+
+- **Issues**: [GitHub Issues](https://github.com/BuscagliaR/ThermogramForge/issues)
+- **Email**: kcr28@nau.edu
+- **Repository**: https://github.com/BuscagliaR/ThermogramForge
+
+---
+
+**Built with ❤️ using R, Shiny, and the R scientific computing ecosystem**
