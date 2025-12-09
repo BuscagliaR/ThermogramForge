@@ -220,18 +220,18 @@
     },
     "ThermogramBaseline": {
       "Source": "github",
-      "Repository": "BuscagliaR/Thermogram_Baseline",
+      "Repository": null,
       "description": {
         "Package": "ThermogramBaseline",
         "Title": "Automates Thermogram Baseline Subtraction",
         "Version": "0.0.0.9900",
         "Authors@R": "\n    person(\"Robert\", \"Buscaglia\", , \"Robert.Buscaglia@nau.edu\", role = c(\"aut\", \"cre\"),\n           comment = c(ORCID = \"YOUR-ORCID-ID\"))",
         "Description": "The package consists of functions that help automate the thermogram cleaning process. The autobaseline function will detect the two endpoints of the curve, and subtract the baseline from there. The final result is interpolated on a set temperature grid. ",
-        "License": "`use_mit_license()`, `use_gpl3_license()` or friends to pick a\nlicense",
+        "License": "MIT + file LICENSE",
         "Encoding": "UTF-8",
         "Roxygen": "list(markdown = TRUE)",
-        "RoxygenNote": "7.3.1",
-        "Depends": "R (>= 2.10)",
+        "RoxygenNote": "7.3.3",
+        "Depends": "R (>= 3.5)",
         "LazyData": "true",
         "VignetteBuilder": "knitr",
         "RemoteType": "github",
@@ -239,16 +239,16 @@
         "RemoteRepo": "Thermogram_Baseline",
         "RemoteUsername": "BuscagliaR",
         "RemoteRef": "HEAD",
-        "RemoteSha": "9630ab3c42d8facd4ed11f50c6f574ef53370e62",
+        "RemoteSha": "b506d143ebaad9a577a6a00e314c55e180869a48",
         "GithubRepo": "Thermogram_Baseline",
         "GithubUsername": "BuscagliaR",
         "GithubRef": "HEAD",
-        "GithubSHA1": "9630ab3c42d8facd4ed11f50c6f574ef53370e62",
+        "GithubSHA1": "b506d143ebaad9a577a6a00e314c55e180869a48",
         "NeedsCompilation": "no",
-        "Packaged": "2025-10-15 17:15:04 UTC; chrisreger",
+        "Packaged": "2025-12-09 21:55:28 UTC; chrisreger",
         "Author": "Robert Buscaglia [aut, cre] (ORCID: YOUR-ORCID-ID)",
         "Maintainer": "Robert Buscaglia <Robert.Buscaglia@nau.edu>",
-        "Built": "R 4.5.1; ; 2025-10-15 17:15:06 UTC; unix"
+        "Built": "R 4.5.1; ; 2025-12-09 21:55:28 UTC; unix"
       }
     },
     "askpass": {
@@ -1773,8 +1773,8 @@
         "Type": "Package",
         "Package": "openxlsx",
         "Title": "Read, Write and Edit xlsx Files",
-        "Version": "4.2.8",
-        "Date": "2025-01-25",
+        "Version": "4.2.8.1",
+        "Date": "2025-10-30",
         "Authors@R": "\n    c(person(given = \"Philipp\",\n             family = \"Schauberger\",\n             role = \"aut\",\n             email = \"philipp@schauberger.co.at\"),\n      person(given = \"Alexander\",\n             family = \"Walker\",\n             role = \"aut\",\n             email = \"Alexander.Walker1989@gmail.com\"),\n      person(given = \"Luca\",\n             family = \"Braglia\",\n             role = \"ctb\"),\n      person(given = \"Joshua\",\n             family = \"Sturm\",\n             role = \"ctb\"),\n      person(given = \"Jan Marvin\",\n             family = \"Garbuszus\",\n             role = c(\"ctb\", \"cre\"),\n             email = \"jan.garbuszus@ruhr-uni-bochum.de\"),\n      person(given = \"Jordan Mark\",\n             family = \"Barbone\",\n             role = \"ctb\",\n             email = \"jmbarbone@gmail.com\",\n             comment = c(ORCID = \"0000-0001-9788-3628\")),\n      person(given = \"David\",\n             family = \"Zimmermann\",\n             role = \"ctb\",\n             email = \"david_j_zimmermann@hotmail.com\"),\n      person(given = \"Reinhold\",\n             family = \"Kainhofer\",\n             role = \"ctb\",\n             email = \"reinhold@kainhofer.com\"))",
         "Description": "Simplifies the creation of Excel .xlsx files by providing a\n    high level interface to writing, styling and editing worksheets.\n    Through the use of 'Rcpp', read/write times are comparable to the\n    'xlsx' and 'XLConnect' packages with the added benefit of removing the\n    dependency on Java.",
         "License": "MIT + file LICENSE",
@@ -1787,22 +1787,22 @@
         "VignetteBuilder": "knitr",
         "Encoding": "UTF-8",
         "Language": "en-US",
-        "RoxygenNote": "7.3.2",
+        "RoxygenNote": "7.3.3",
         "Collate": "'CommentClass.R' 'HyperlinkClass.R' 'RcppExports.R'\n'class_definitions.R' 'StyleClass.R' 'WorkbookClass.R'\n'asserts.R' 'baseXML.R' 'borderFunctions.R' 'build_workbook.R'\n'chartsheet_class.R' 'conditional_formatting.R'\n'data-fontSizeLookupTables.R' 'helperFunctions.R'\n'loadWorkbook.R' 'onUnload.R' 'openXL.R' 'openxlsx-package.R'\n'openxlsx.R' 'openxlsxCoerce.R' 'readWorkbook.R'\n'setWindowSize.R' 'sheet_data_class.R' 'utils.R'\n'workbook_column_widths.R' 'workbook_read_workbook.R'\n'workbook_write_data.R' 'worksheet_class.R' 'wrappers.R'\n'writeData.R' 'writeDataTable.R' 'writexlsx.R' 'zzz.R'",
         "LazyData": "true",
         "NeedsCompilation": "yes",
-        "Packaged": "2025-01-25 19:28:01 UTC; janmarvingarbuszus",
-        "Author": "Philipp Schauberger [aut],\n  Alexander Walker [aut],\n  Luca Braglia [ctb],\n  Joshua Sturm [ctb],\n  Jan Marvin Garbuszus [ctb, cre],\n  Jordan Mark Barbone [ctb] (<https://orcid.org/0000-0001-9788-3628>),\n  David Zimmermann [ctb],\n  Reinhold Kainhofer [ctb]",
+        "Packaged": "2025-10-30 20:28:52 UTC; janmarvingarbuszus",
+        "Author": "Philipp Schauberger [aut],\n  Alexander Walker [aut],\n  Luca Braglia [ctb],\n  Joshua Sturm [ctb],\n  Jan Marvin Garbuszus [ctb, cre],\n  Jordan Mark Barbone [ctb] (ORCID:\n    <https://orcid.org/0000-0001-9788-3628>),\n  David Zimmermann [ctb],\n  Reinhold Kainhofer [ctb]",
         "Maintainer": "Jan Marvin Garbuszus <jan.garbuszus@ruhr-uni-bochum.de>",
         "Repository": "CRAN",
-        "Date/Publication": "2025-01-25 20:30:02 UTC",
-        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-03-31 22:03:35 UTC; unix",
+        "Date/Publication": "2025-10-31 06:10:51 UTC",
+        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-10-31 08:24:20 UTC; unix",
         "Archs": "openxlsx.so.dSYM",
         "RemoteType": "standard",
         "RemotePkgRef": "openxlsx",
         "RemoteRef": "openxlsx",
         "RemoteRepos": "https://cran.rstudio.com",
-        "RemoteSha": "4.2.8"
+        "RemoteSha": "4.2.8.1"
       }
     },
     "otel": {
@@ -2135,7 +2135,7 @@
       "description": {
         "Package": "readr",
         "Title": "Read Rectangular Text Data",
-        "Version": "2.1.5",
+        "Version": "2.1.6",
         "Authors@R": "c(\n    person(\"Hadley\", \"Wickham\", , \"hadley@posit.co\", role = \"aut\"),\n    person(\"Jim\", \"Hester\", role = \"aut\"),\n    person(\"Romain\", \"Francois\", role = \"ctb\"),\n    person(\"Jennifer\", \"Bryan\", , \"jenny@posit.co\", role = c(\"aut\", \"cre\"),\n           comment = c(ORCID = \"0000-0002-6983-2759\")),\n    person(\"Shelby\", \"Bearrows\", role = \"ctb\"),\n    person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\")),\n    person(\"https://github.com/mandreyel/\", role = \"cph\",\n           comment = \"mio library\"),\n    person(\"Jukka\", \"Jylänki\", role = c(\"ctb\", \"cph\"),\n           comment = \"grisu3 implementation\"),\n    person(\"Mikkel\", \"Jørgensen\", role = c(\"ctb\", \"cph\"),\n           comment = \"grisu3 implementation\")\n  )",
         "Description": "The goal of 'readr' is to provide a fast and friendly way to\n    read rectangular data (like 'csv', 'tsv', and 'fwf').  It is designed\n    to flexibly parse many types of data found in the wild, while still\n    cleanly failing when data unexpectedly changes.",
         "License": "MIT + file LICENSE",
@@ -2151,20 +2151,20 @@
         "Config/testthat/parallel": "false",
         "Encoding": "UTF-8",
         "Language": "en-US",
-        "RoxygenNote": "7.2.3",
+        "RoxygenNote": "7.3.3",
         "NeedsCompilation": "yes",
-        "Packaged": "2024-01-10 21:03:49 UTC; jenny",
-        "Author": "Hadley Wickham [aut],\n  Jim Hester [aut],\n  Romain Francois [ctb],\n  Jennifer Bryan [aut, cre] (<https://orcid.org/0000-0002-6983-2759>),\n  Shelby Bearrows [ctb],\n  Posit Software, PBC [cph, fnd],\n  https://github.com/mandreyel/ [cph] (mio library),\n  Jukka Jylänki [ctb, cph] (grisu3 implementation),\n  Mikkel Jørgensen [ctb, cph] (grisu3 implementation)",
+        "Packaged": "2025-11-14 17:31:56 UTC; jenny",
+        "Author": "Hadley Wickham [aut],\n  Jim Hester [aut],\n  Romain Francois [ctb],\n  Jennifer Bryan [aut, cre] (ORCID:\n    <https://orcid.org/0000-0002-6983-2759>),\n  Shelby Bearrows [ctb],\n  Posit Software, PBC [cph, fnd],\n  https://github.com/mandreyel/ [cph] (mio library),\n  Jukka Jylänki [ctb, cph] (grisu3 implementation),\n  Mikkel Jørgensen [ctb, cph] (grisu3 implementation)",
         "Maintainer": "Jennifer Bryan <jenny@posit.co>",
         "Repository": "CRAN",
-        "Date/Publication": "2024-01-10 23:20:02 UTC",
-        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-04-02 08:22:30 UTC; unix",
+        "Date/Publication": "2025-11-14 22:30:02 UTC",
+        "Built": "R 4.5.2; aarch64-apple-darwin20; 2025-11-19 04:51:21 UTC; unix",
         "Archs": "readr.so.dSYM",
         "RemoteType": "standard",
         "RemotePkgRef": "readr",
         "RemoteRef": "readr",
         "RemoteRepos": "https://cran.rstudio.com",
-        "RemoteSha": "2.1.5"
+        "RemoteSha": "2.1.6"
       }
     },
     "readxl": {
@@ -2722,32 +2722,32 @@
     },
     "tlbparam": {
       "Source": "github",
-      "Repository": "BuscagliaR/tlbparam",
+      "Repository": null,
       "description": {
         "Package": "tlbparam",
         "Title": "What the Package Does (One Line, Title Case)",
         "Version": "0.0.0.9000",
         "Authors@R": "\n    person(\"First\", \"Last\", , \"first.last@example.com\", role = c(\"aut\", \"cre\"),\n           comment = c(ORCID = \"YOUR-ORCID-ID\"))",
         "Description": "What the package does (one paragraph).",
-        "License": "`use_mit_license()`, `use_gpl3_license()` or friends to pick a\nlicense",
+        "License": "MIT + file LICENSE",
         "Encoding": "UTF-8",
         "Roxygen": "list(markdown = TRUE)",
-        "RoxygenNote": "7.2.3",
+        "RoxygenNote": "7.3.3",
         "RemoteType": "github",
         "RemoteHost": "api.github.com",
         "RemoteRepo": "tlbparam",
         "RemoteUsername": "BuscagliaR",
         "RemoteRef": "HEAD",
-        "RemoteSha": "f044fe415522837b9a314c19fbf1d50204d32dc3",
+        "RemoteSha": "c140f5d6b7157a5b0f9b7dc54eb9e67c7297f55a",
         "GithubRepo": "tlbparam",
         "GithubUsername": "BuscagliaR",
         "GithubRef": "HEAD",
-        "GithubSHA1": "f044fe415522837b9a314c19fbf1d50204d32dc3",
+        "GithubSHA1": "c140f5d6b7157a5b0f9b7dc54eb9e67c7297f55a",
         "NeedsCompilation": "no",
-        "Packaged": "2025-10-15 17:15:10 UTC; chrisreger",
+        "Packaged": "2025-12-09 21:55:32 UTC; chrisreger",
         "Author": "First Last [aut, cre] (ORCID: YOUR-ORCID-ID)",
         "Maintainer": "First Last <first.last@example.com>",
-        "Built": "R 4.5.1; ; 2025-10-15 17:15:10 UTC; unix"
+        "Built": "R 4.5.1; ; 2025-12-09 21:55:32 UTC; unix"
       }
     },
     "tseries": {
@@ -2986,39 +2986,6 @@
         "Built": "R 4.5.0; ; 2025-03-31 21:42:13 UTC; unix"
       }
     },
-    "writexl": {
-      "Source": "CRAN",
-      "Repository": "https://cran.rstudio.com",
-      "description": {
-        "Package": "writexl",
-        "Type": "Package",
-        "Title": "Export Data Frames to Excel 'xlsx' Format",
-        "Version": "1.5.4",
-        "Authors@R": "c(\n    person(\"Jeroen\", \"Ooms\", ,\"jeroenooms@gmail.com\", role = c(\"aut\", \"cre\"),\n      comment = c(ORCID = \"0000-0002-4035-0289\")),\n    person(\"John McNamara\", role = \"cph\",\n      comment = \"Author of libxlsxwriter (see AUTHORS and COPYRIGHT files for details)\"))",
-        "Description": "Zero-dependency data frame to xlsx exporter based on 'libxlsxwriter'\n    <https://libxlsxwriter.github.io>. Fast and no Java or Excel required.",
-        "License": "BSD_2_clause + file LICENSE",
-        "Encoding": "UTF-8",
-        "URL": "https://ropensci.r-universe.dev/writexl\nhttps://docs.ropensci.org/writexl/",
-        "BugReports": "https://github.com/ropensci/writexl/issues",
-        "RoxygenNote": "7.0.2",
-        "Suggests": "spelling, readxl, nycflights13, testthat, bit64",
-        "Language": "en-US",
-        "SystemRequirements": "zlib",
-        "NeedsCompilation": "yes",
-        "Packaged": "2025-04-15 13:34:41 UTC; jeroen",
-        "Author": "Jeroen Ooms [aut, cre] (<https://orcid.org/0000-0002-4035-0289>),\n  John McNamara [cph] (Author of libxlsxwriter (see AUTHORS and COPYRIGHT\n    files for details))",
-        "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
-        "Repository": "CRAN",
-        "Date/Publication": "2025-04-15 14:40:03 UTC",
-        "Built": "R 4.5.0; aarch64-apple-darwin20; 2025-04-15 14:51:55 UTC; unix",
-        "Archs": "writexl.so.dSYM",
-        "RemoteType": "standard",
-        "RemotePkgRef": "writexl",
-        "RemoteRef": "writexl",
-        "RemoteRepos": "https://cran.rstudio.com",
-        "RemoteSha": "1.5.4"
-      }
-    },
     "xfun": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -3201,7 +3168,7 @@
   },
   "files": {
     "app.R": {
-      "checksum": "b9223713fc981545e0828992c1eb4508"
+      "checksum": "064d0bc9d85288e3e04dd2410ab9eb56"
     },
     "data/processed/Small_CSV_metadata.txt": {
       "checksum": "90e47af203b4bdef49574fe273ae9221"
@@ -3215,38 +3182,44 @@
     "data/processed/Small_RDS.rds": {
       "checksum": "2ed92524cdc748660d64ee72eb692ca7"
     },
-    "data/processed/SuperSmall_TESTING.rds": {
-      "checksum": "43e2179864f0b294eeba6cdb73903371"
+    "data/processed/thermogram_processed_test.xlsx": {
+      "checksum": "82ebf696c24521a143229290b692c925"
     },
     "modules/mod_data_overview.R": {
-      "checksum": "97022c1d145db192b382743a3714173a"
+      "checksum": "732556cad9ee3b94b0eb05af910b69c6"
     },
     "modules/mod_report_builder.R": {
-      "checksum": "8967ff885b71df640a461751f687e15a"
+      "checksum": "30fe275b387f5df4ff7cad6eee6ee74f"
     },
     "modules/mod_review_endpoints.R": {
-      "checksum": "c6705481cfe8a64caf2922184fa30859"
+      "checksum": "fa337de3d20cb851db58749ca7899a6e"
     },
-    "reports/Another_Test_CSV.csv": {
-      "checksum": "1a5bf9414ca6f457b6e77716b281f674"
+    "modules/mod_upload_modal.R": {
+      "checksum": "911285529a5ad55c473603676ebdf63f"
     },
-    "reports/Report_20251017_161815.csv": {
-      "checksum": "04cb4bb931a73b2e3f0b0d2ea539fe17"
+    "modules/mod_user_guide.R": {
+      "checksum": "6c66ed58185603a52ae490fe8141c43c"
     },
-    "reports/Report_20251023_035608.csv": {
-      "checksum": "e1c6b4d3bd79275620ed5e4e6ffc2579"
-    },
-    "reports/Report_20251023_224833.xlsx": {
-      "checksum": "3cdfd01772cfa0ad700f32ba0c4aaeaf"
+    "utils/baseline_utils.R": {
+      "checksum": "ef8b58668dea586853094833e3e199ad"
     },
     "utils/data_utils.R": {
-      "checksum": "a636d1921a8de8548aff2cc2049bed2e"
+      "checksum": "922c268a9ea6e45152b52eec16354574"
+    },
+    "utils/file_io_utils.R": {
+      "checksum": "24f0f36a077fc62df6f10b9fba45affb"
+    },
+    "utils/format_utils.R": {
+      "checksum": "3edb7fe7beef775036b31449d9b77cde"
+    },
+    "utils/metrics_utils.R": {
+      "checksum": "3d764e46f55a95c26653972e77fc6cc9"
     },
     "utils/processing_utils.R": {
-      "checksum": "4a21108062e6af040bfad8591d91858b"
+      "checksum": "80fbf09d583ecb32ac61359a88a1eb3b"
     },
     "utils/theme.R": {
-      "checksum": "7920bf5230e971f7ec59d3d93afc5067"
+      "checksum": "4479753bd2249ed5e31cb00dd7c19a6b"
     }
   },
   "users": null
