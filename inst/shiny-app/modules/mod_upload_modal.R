@@ -9,6 +9,9 @@
 # LAST UPDATED: December 9, 2024
 #
 
+# Diagnostic: Confirm this file is being sourced
+cat("\n[STARTUP] mod_upload_modal.R loaded successfully\n")
+
 # ==============================================================================
 # PURPOSE
 # ==============================================================================

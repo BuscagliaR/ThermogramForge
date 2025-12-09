@@ -1,29 +1,212 @@
 # ==============================================================================
-# Data Utilities for ThermogramForge
+# Processing Utilities for ThermogramForge
 # ==============================================================================
 #
-# PURPOSE:
-#   Core functions for reading, parsing, validating, and converting thermogram
-#   data files (CSV and Excel formats)
-#
-# FUNCTIONS:
-#   1. detect_file_type()          - Determine if file is CSV or Excel
-#   2. read_thermogram_file()      - Read and parse thermogram data
-#   3. detect_data_format()        - Identify data structure/format
-#   4. validate_thermogram_data()  - Check data quality and completeness
-#   5. convert_to_tlbparam_format() - Convert to tlbparam wide format
-#
-# DATA FORMATS SUPPORTED:
-#   - Single sample: Temperature, dCp columns
-#   - Multi-sample long: Sample_ID, Temperature, dCp columns
-#   - Multi-sample wide: T1a, 1a, T1b, 1b column pairs
-#
+# FILE: processing_utils.R
+# VERSION: 2.0.0
 # AUTHOR: Chris Reger
-# LAST UPDATED: October 22, 2025
+# LAST UPDATED: December 9, 2024
+#
+# ==============================================================================
+# PURPOSE
+# ==============================================================================
+#
+# Core data processing pipeline for ThermogramForge. This file provides all
+# functions needed to:
+#
+#   - Read and parse thermogram data files (CSV and Excel)
+#   - Detect and validate data formats
+#   - Apply baseline detection using ThermogramBaseline package
+#   - Perform signal detection for quality assessment
+#   - Calculate thermogram metrics using tlbparam package
+#   - Save and load processed datasets
+#
+# This is the primary utility file for the application's data processing
+# workflow, handling everything from raw file upload to final metric
+# calculation.
+#
+# ==============================================================================
+# ARCHITECTURE
+# ==============================================================================
+#
+# The processing pipeline follows this flow:
+#
+#   1. FILE READING
+#      detect_file_type() -> read_thermogram_file()
+#      Reads CSV or Excel files, detects format, applies temp filtering
+#
+#   2. FORMAT DETECTION & VALIDATION
+#      detect_data_format() -> validate_thermogram_data()
+#      Identifies data structure and checks for quality issues
+#
+#   3. BASELINE PROCESSING
+#      process_thermogram_data() -> apply_baseline_detection()
+#      Runs ThermogramBaseline algorithm to find baseline endpoints
+#
+#   4. SIGNAL DETECTION
+#      apply_signal_detection()
+#      Determines if sample has detectable thermal signature
+#
+#   5. METRIC CALCULATION
+#      calculate_tlbparam_metrics() -> convert_to_tlbparam_format()
+#      Computes thermogram metrics using tlbparam package
+#
+#   6. PERSISTENCE
+#      save_processed_data() / load_processed_data()
+#      Stores and retrieves processed datasets
+#
+# ==============================================================================
+# SECTIONS
+# ==============================================================================
+#
+# This file is organized into the following sections:
+#
+#   Line ~70:   FILE TYPE DETECTION
+#               detect_file_type()
+#
+#   Line ~140:  FILE READING AND PARSING
+#               read_thermogram_file()
+#
+#   Line ~270:  DATA FORMAT DETECTION
+#               detect_data_format()
+#
+#   Line ~390:  DATA VALIDATION
+#               validate_thermogram_data()
+#
+#   Line ~470:  TLBPARAM FORMAT CONVERSION
+#               convert_to_tlbparam_format()
+#
+#   Line ~680:  BASELINE DETECTION AND PROCESSING
+#               process_thermogram_data()
+#
+#   Line ~850:  HELPER FUNCTIONS (Internal)
+#               extract_sample_data(), apply_baseline_detection(),
+#               apply_signal_detection()
+#
+#   Line ~1000: FILE SAVE/LOAD OPERATIONS
+#               save_processed_data(), load_processed_data(),
+#               list_processed_datasets(), delete_processed_data()
+#
+#   Line ~1540: TLBPARAM METRIC CALCULATION
+#               calculate_tlbparam_metrics()
+#
+#   Line ~1670: CSV FORMAT VALIDATION
+#               validate_csv_format()
+#
+# ==============================================================================
+# EXPORTED FUNCTIONS
+# ==============================================================================
+#
+# File Operations:
+#   - detect_file_type()           Determine if file is CSV or Excel
+#   - read_thermogram_file()       Read and parse thermogram data with options
+#
+# Format Detection:
+#   - detect_data_format()         Identify data structure (single/multi/wide)
+#   - validate_thermogram_data()   Check data quality and completeness
+#   - validate_csv_format()        Validate CSV-specific format requirements
+#
+# Processing:
+#   - process_thermogram_data()    Run full baseline detection pipeline
+#   - convert_to_tlbparam_format() Convert to tlbparam-compatible wide format
+#   - calculate_tlbparam_metrics() Calculate metrics using tlbparam package
+#
+# Persistence:
+#   - save_processed_data()        Save dataset to RDS/CSV/Excel
+#   - load_processed_data()        Load previously saved dataset
+#   - list_processed_datasets()    List all saved datasets in directory
+#   - delete_processed_data()      Remove saved dataset files
+#
+# ==============================================================================
+# DATA FORMATS SUPPORTED
+# ==============================================================================
+#
+# ThermogramForge supports three thermogram data formats:
+#
+# 1. SINGLE SAMPLE (Standard Format)
+#    Columns: Temperature, dCp
+#    One thermogram per file with temperature and heat capacity columns.
+#
+#    Example:
+#    | Temperature | dCp      |
+#    |-------------|----------|
+#    | 45.0        | 0.0012   |
+#    | 45.5        | 0.0015   |
+#
+# 2. MULTI-SAMPLE LONG FORMAT
+#    Columns: Sample_ID, Temperature, dCp
+#    Multiple samples stacked vertically with identifier column.
+#
+#    Example:
+#    | Sample_ID | Temperature | dCp      |
+#    |-----------|-------------|----------|
+#    | Sample_A  | 45.0        | 0.0012   |
+#    | Sample_A  | 45.5        | 0.0015   |
+#    | Sample_B  | 45.0        | 0.0018   |
+#
+# 3. MULTI-SAMPLE WIDE FORMAT
+#    Columns: T1a, 1a, T1b, 1b, T2a, 2a, ...
+#    Paired temperature and dCp columns for each sample.
+#    Temperature columns prefixed with 'T', dCp columns are sample IDs.
+#
+#    Example:
+#    | T1a   | 1a      | T1b   | 1b      |
+#    |-------|---------|-------|---------|
+#    | 45.0  | 0.0012  | 45.0  | 0.0018  |
+#    | 45.5  | 0.0015  | 45.5  | 0.0021  |
+#
+# ==============================================================================
+# DEPENDENCIES
+# ==============================================================================
+#
+# Required packages:
+#   - readr:              CSV file reading (read_csv, write_csv)
+#   - readxl:             Excel file reading (read_excel, excel_sheets)
+#   - writexl:            Excel file writing (write_xlsx)
+#   - dplyr:              Data manipulation (filter, mutate, select)
+#   - ThermogramBaseline: Baseline detection algorithm (from BuscagliaR)
+#   - tlbparam:           Thermogram metric calculations (from BuscagliaR)
+#   - forecast:           Time series utilities (used by ThermogramBaseline)
+#
+# Note: ThermogramBaseline and tlbparam are custom packages from the
+# BuscagliaR GitHub repositories, not CRAN packages.
+#
+# ==============================================================================
+# USAGE EXAMPLES
+# ==============================================================================
+#
+# Basic file reading:
+#
+#   result <- read_thermogram_file("data.csv")
+#   result <- read_thermogram_file("data.xlsx", sheet = "Sheet1")
+#   result <- read_thermogram_file("data.csv", temp_min = 45, temp_max = 90)
+#
+# Full processing pipeline:
+#
+#   # Read file
+#   file_result <- read_thermogram_file("thermograms.xlsx", sheet = "Data")
+#
+#   # Validate
+#   validation <- validate_thermogram_data(file_result$data, file_result$format_info)
+#
+#   # Process with baseline detection
+#   processed <- process_thermogram_data(
+#     data = file_result$data,
+#     format_info = file_result$format_info,
+#     temp_params = list(temp_min = 45, temp_max = 90)
+#   )
+#
+#   # Calculate metrics
+#   metrics <- calculate_tlbparam_metrics(processed, selected_metrics = c("Tm", "AUC"))
+#
+#   # Save results
+#   save_processed_data(processed, "my_dataset", format = "rds")
+#
 # ==============================================================================
 
+
 # ==============================================================================
-# File Type Detection
+# FILE TYPE DETECTION
 # ==============================================================================
 
 #' Detect File Type from Extension
@@ -67,7 +250,12 @@ detect_file_type <- function(file_path) {
 
 
 # ==============================================================================
-# File Reading and Parsing
+# FILE READING AND PARSING
+# ==============================================================================
+#
+# Functions for reading thermogram data from CSV and Excel files.
+# Handles sheet selection for Excel files and optional temperature filtering.
+#
 # ==============================================================================
 
 #' Read Thermogram Data File
@@ -77,10 +265,12 @@ detect_file_type <- function(file_path) {
 #' containing the raw data, format information, and validation results.
 #'
 #' @param filepath Character. Path to the file to read
-#' @param temp_min Numeric or NULL. Minimum temperature to include (°C).
+#' @param temp_min Numeric or NULL. Minimum temperature to include (C).
 #'   If NULL, no lower filtering is applied. Default: NULL
-#' @param temp_max Numeric or NULL. Maximum temperature to include (°C).
+#' @param temp_max Numeric or NULL. Maximum temperature to include (C).
 #'   If NULL, no upper filtering is applied. Default: NULL
+#' @param sheet Character or NULL. For Excel files, the name of the sheet to read.
+#'   If NULL, reads the first sheet. Ignored for CSV files. Default: NULL
 #'
 #' @return List containing:
 #'   \itemize{
@@ -95,17 +285,26 @@ detect_file_type <- function(file_path) {
 #' - Useful for removing noisy data at temperature extremes
 #' - Applied independently to each sample in multi-sample files
 #'
+#' Excel sheet selection:
+#' - For Excel files with multiple sheets, use the `sheet` parameter
+#' - Sheet names are case-sensitive
+#' - If sheet parameter is NULL, reads the first sheet
+#' - Use readxl::excel_sheets(filepath) to list available sheets
+#'
 #' Process:
 #' 1. Detect file type (CSV or Excel)
-#' 2. Read file using appropriate reader
+#' 2. Read file using appropriate reader (with sheet selection for Excel)
 #' 3. Detect data format structure
 #' 4. Apply temperature filtering if requested
 #' 5. Return structured data
 #'
 #' @examples
 #' \dontrun{
-#' # Read entire file
+#' # Read entire file (CSV)
 #' result <- read_thermogram_file("thermogram.csv")
+#'
+#' # Read specific Excel sheet
+#' result <- read_thermogram_file("thermogram.xlsx", sheet = "Data")
 #'
 #' # Read with temperature filtering
 #' result <- read_thermogram_file(
@@ -113,10 +312,18 @@ detect_file_type <- function(file_path) {
 #'   temp_min = 20,
 #'   temp_max = 110
 #' )
+#'
+#' # Read specific sheet with filtering
+#' result <- read_thermogram_file(
+#'   "thermogram.xlsx",
+#'   temp_min = 45,
+#'   temp_max = 90,
+#'   sheet = "Plasma Samples"
+#' )
 #' }
 #'
 #' @export
-read_thermogram_file <- function(filepath, temp_min = NULL, temp_max = NULL) {
+read_thermogram_file <- function(filepath, temp_min = NULL, temp_max = NULL, sheet = NULL) {
   
   # ============================================================================
   # Step 1: Detect and Read File
@@ -129,12 +336,19 @@ read_thermogram_file <- function(filepath, temp_min = NULL, temp_max = NULL) {
   raw_data <- tryCatch({
     
     if (file_type == "csv") {
-      # Read CSV file
+      # Read CSV file (sheet parameter ignored)
       readr::read_csv(filepath, show_col_types = FALSE)
       
     } else if (file_type == "excel") {
-      # Read Excel file (first sheet by default)
-      readxl::read_excel(filepath)
+      # Read Excel file with sheet selection
+      if (!is.null(sheet)) {
+        # User specified a sheet
+        cat(sprintf("[READ] Reading Excel sheet: '%s'\n", sheet))
+        readxl::read_excel(filepath, sheet = sheet)
+      } else {
+        # No sheet specified, read first sheet
+        readxl::read_excel(filepath)
+      }
       
     } else {
       stop("Unexpected file type: ", file_type)
@@ -154,54 +368,27 @@ read_thermogram_file <- function(filepath, temp_min = NULL, temp_max = NULL) {
   # Step 3: Apply Temperature Filtering (Optional)
   # ============================================================================
   
-  # Only filter if at least one bound is specified
+  # Only filter if temp_min or temp_max is specified
   if (!is.null(temp_min) || !is.null(temp_max)) {
     
     cat(sprintf(
-      "[READ] Applying temperature filter: %.1f to %.1f°C\n",
+      "[READ] Applying temperature filter: %.1f to %.1fC\n",
       ifelse(is.null(temp_min), -Inf, temp_min),
       ifelse(is.null(temp_max), Inf, temp_max)
     ))
     
-    # Filter differently based on data format
-    if (format_info$data_format == "standard") {
-      # Standard format: single Temperature column
+    # Different filtering logic based on detected format
+    if (format_info$format_type == "multi_sample_wide") {
+      # Wide format: filter by setting values to NA (can't remove rows)
       
-      temp_col <- format_info$temperature_col
-      n_before <- nrow(raw_data)
-      
-      # Create filter mask
-      keep_mask <- rep(TRUE, nrow(raw_data))
-      
-      if (!is.null(temp_min)) {
-        keep_mask <- keep_mask & (raw_data[[temp_col]] >= temp_min)
-      }
-      
-      if (!is.null(temp_max)) {
-        keep_mask <- keep_mask & (raw_data[[temp_col]] <= temp_max)
-      }
-      
-      # Apply filter
-      raw_data <- raw_data[keep_mask, , drop = FALSE]
-      
-      cat(sprintf(
-        "[READ] Filtered: kept %d/%d points\n",
-        nrow(raw_data),
-        n_before
-      ))
-      
-    } else if (format_info$data_format == "wide") {
-      # Wide format: multiple temperature columns (one per sample)
-      
-      # Filter each sample's temperature column independently
-      for (i in seq_along(format_info$temperature_cols)) {
-        temp_col <- format_info$temperature_cols[i]
+      for (i in seq_along(format_info$sample_ids)) {
         sample_id <- format_info$sample_ids[i]
+        temp_col <- format_info$temperature_cols[i]  # Fixed: was temp_cols
         
         # Get temperature values for this sample
         temps <- raw_data[[temp_col]]
         
-        # Create filter mask for this sample
+        # Create mask: keep non-NA temps within range
         keep_mask <- !is.na(temps)  # Start with non-NA
         
         if (!is.null(temp_min)) {
@@ -248,7 +435,13 @@ read_thermogram_file <- function(filepath, temp_min = NULL, temp_max = NULL) {
 
 
 # ==============================================================================
-# Data Format Detection
+# DATA FORMAT DETECTION
+# ==============================================================================
+#
+# Analyzes raw data to determine its structure (single sample, multi-sample
+# long format, or multi-sample wide format). Returns metadata about columns,
+# sample counts, and data organization.
+#
 # ==============================================================================
 
 #' Detect Thermogram Data Format
@@ -370,7 +563,13 @@ detect_data_format <- function(data) {
 
 
 # ==============================================================================
-# Data Validation
+# DATA VALIDATION
+# ==============================================================================
+#
+# Quality checks for thermogram data. Validates temperature ranges, data
+# completeness, sample counts, and identifies potential issues that could
+# affect processing accuracy.
+#
 # ==============================================================================
 
 #' Validate Thermogram Data Quality
@@ -426,7 +625,7 @@ validate_thermogram_data <- function(data, format_info) {
       warnings <- c(
         warnings,
         sprintf(
-          "Unusual temperature range: %.1f to %.1f°C",
+          "Unusual temperature range: %.1f to %.1fC",
           temp_range[1],
           temp_range[2]
         )
@@ -454,7 +653,13 @@ validate_thermogram_data <- function(data, format_info) {
 
 
 # ==============================================================================
-# tlbparam Format Conversion
+# TLBPARAM FORMAT CONVERSION
+# ==============================================================================
+#
+# Converts processed thermogram data to the wide format required by the
+# tlbparam package for metric calculations. Handles interpolation to common
+# temperature grid and restructures data for tlbparam compatibility.
+#
 # ==============================================================================
 
 #' Convert Processed Data to tlbparam Wide Format
@@ -488,7 +693,7 @@ convert_to_tlbparam_format <- function(processed_data) {
   n_temps <- length(temp_grid)
   
   cat(sprintf(
-    "[FORMAT] Temperature grid: %d points from %.1f to %.1f°C\n",
+    "[FORMAT] Temperature grid: %d points from %.1f to %.1fC\n",
     n_temps,
     min(temp_grid),
     max(temp_grid)
@@ -600,7 +805,7 @@ convert_to_tlbparam_format <- function(processed_data) {
     sample_rows[[sample_id]] <- sample_row
     
     cat(sprintf(
-      "[FORMAT] ✓ Sample %s: interpolated to %d points\n",
+      "[FORMAT] [OK] Sample %s: interpolated to %d points\n",
       sample_id,
       length(dcp_on_grid)
     ))
@@ -622,7 +827,7 @@ convert_to_tlbparam_format <- function(processed_data) {
   }
   
   cat(sprintf(
-    "\n[FORMAT] ✅ Conversion complete: %d samples x %d columns\n",
+    "\n[FORMAT] [OK] Conversion complete: %d samples x %d columns\n",
     nrow(result_df),
     ncol(result_df)
   ))
@@ -636,6 +841,18 @@ convert_to_tlbparam_format <- function(processed_data) {
 
 # ==============================================================================
 # BASELINE DETECTION AND PROCESSING
+# ==============================================================================
+#
+# Core processing functions that apply the ThermogramBaseline algorithm to
+# detect baseline endpoints and subtract baseline from thermogram data.
+# Also includes signal detection for quality assessment.
+#
+# Key function: process_thermogram_data()
+#   - Iterates through all samples in dataset
+#   - Applies baseline detection using ThermogramBaseline package
+#   - Performs signal quality assessment
+#   - Returns comprehensive processed data structure
+#
 # ==============================================================================
 
 #' Process Thermogram Data with Baseline Detection
@@ -651,8 +868,8 @@ convert_to_tlbparam_format <- function(processed_data) {
 #'   }
 #' @param temp_params List with processing parameters:
 #'   \itemize{
-#'     \item temp_min: Minimum temperature (°C) for filtering
-#'     \item temp_max: Maximum temperature (°C) for filtering
+#'     \item temp_min: Minimum temperature (C) for filtering
+#'     \item temp_max: Maximum temperature (C) for filtering
 #'     \item window_size: Window size for rolling variance (default 90)
 #'     \item exclusion_lower: Lower exclusion temperature (default 60)
 #'     \item exclusion_upper: Upper exclusion temperature (default 80)
@@ -697,10 +914,10 @@ process_thermogram_data <- function(data, format_info, temp_params) {
   
   cat(sprintf("\n[PROCESS_UTIL] Starting baseline detection\n"))
   cat(sprintf("[PROCESS_UTIL] Parameters:\n"))
-  cat(sprintf("  - Temperature range: [%.1f, %.1f]°C\n", temp_params$temp_min, temp_params$temp_max))
+  cat(sprintf("  - Temperature range: [%.1f, %.1f]C\n", temp_params$temp_min, temp_params$temp_max))
   cat(sprintf("  - Window size: %d\n", window_size))
-  cat(sprintf("  - Exclusion zone: [%.1f, %.1f]°C\n", exclusion_lower, exclusion_upper))
-  cat(sprintf("  - Grid resolution: %.2f°C\n", grid_resolution))
+  cat(sprintf("  - Exclusion zone: [%.1f, %.1f]C\n", exclusion_lower, exclusion_upper))
+  cat(sprintf("  - Grid resolution: %.2fC\n", grid_resolution))
   cat(sprintf("  - Point selection: %s\n", point_selection))
   cat(sprintf("[PROCESS_UTIL] Format: %s, Samples: %d\n",
               format_info$format_type,
@@ -791,7 +1008,7 @@ process_thermogram_data <- function(data, format_info, temp_params) {
       success = TRUE
     )
     
-    cat(sprintf("[PROCESS_UTIL] ✓ Sample %s processed successfully (endpoints: %.1f, %.1f)\n", 
+    cat(sprintf("[PROCESS_UTIL] [OK] Sample %s processed successfully (endpoints: %.1f, %.1f)\n", 
                 sample_id, baseline_result$lower_endpoint, baseline_result$upper_endpoint))
   }
   
@@ -838,6 +1055,16 @@ process_thermogram_data <- function(data, format_info, temp_params) {
 
 # ==============================================================================
 # HELPER FUNCTIONS (Internal, not exported)
+# ==============================================================================
+#
+# Internal utility functions used by the main processing pipeline.
+# These are not exported and should not be called directly.
+#
+# Functions:
+#   - extract_sample_data()       Extract single sample from multi-sample data
+#   - apply_baseline_detection()  Run ThermogramBaseline on one sample
+#   - apply_signal_detection()    Check if sample has detectable signal
+#
 # ==============================================================================
 
 #' Extract Sample Data Based on Format Type
@@ -910,7 +1137,7 @@ apply_baseline_detection <- function(sample_data, window_size, exclusion_lower,
       explicit = FALSE
     )
     
-    cat(sprintf("[PROCESS_UTIL] ✓ Baseline detection complete (endpoints: %.1f, %.1f°C)\n", 
+    cat(sprintf("[PROCESS_UTIL] [OK] Baseline detection complete (endpoints: %.1f, %.1fC)\n", 
                 endpoints$lower, endpoints$upper))
     
     # Return both original and processed data
@@ -960,7 +1187,7 @@ apply_signal_detection <- function(processed_data, sample_id) {
     result_string <- as.character(result$result[1])
     has_sig <- (result_string == "Signal")
     
-    cat(sprintf("[PROCESS_UTIL] ✓ Signal detection: %s\n", result_string))
+    cat(sprintf("[PROCESS_UTIL] [OK] Signal detection: %s\n", result_string))
     
     return(list(has_signal = has_sig))
     
@@ -973,6 +1200,22 @@ apply_signal_detection <- function(processed_data, sample_id) {
 
 # ==============================================================================
 # FILE SAVE/LOAD OPERATIONS
+# ==============================================================================
+#
+# Persistence functions for saving and loading processed thermogram datasets.
+# Supports multiple output formats (RDS, CSV, Excel) with metadata.
+#
+# Functions:
+#   - save_processed_data()       Save dataset to file (RDS/CSV/Excel)
+#   - load_processed_data()       Load previously saved dataset
+#   - list_processed_datasets()   List all saved datasets in directory
+#   - delete_processed_data()     Remove saved dataset files
+#
+# Internal helpers:
+#   - format_data_for_wide_export()  Prepare data for CSV/Excel export
+#   - save_metadata_file()           Write metadata JSON alongside data
+#   - create_metadata_dataframe()    Build metadata summary table
+#
 # ==============================================================================
 
 #' Save Processed Thermogram Data
@@ -1042,13 +1285,13 @@ save_processed_data <- function(data, filename, format = "rds", output_dir = "da
     if (format == "rds") {
       # RDS: Save complete R object (can be fully reloaded)
       saveRDS(data, file = filepath)
-      cat(sprintf("[SAVE] ✓ Saved RDS: %d samples\n", data$n_samples))
+      cat(sprintf("[SAVE] [OK] Saved RDS: %d samples\n", data$n_samples))
       
     } else if (format == "csv") {
       # CSV: Wide format export
       wide_data <- format_data_for_wide_export(data)
       readr::write_csv(wide_data, filepath)
-      cat(sprintf("[SAVE] ✓ Saved CSV: %d samples, %d columns\n", 
+      cat(sprintf("[SAVE] [OK] Saved CSV: %d samples, %d columns\n", 
                   nrow(wide_data), ncol(wide_data)))
       
       # Save metadata as companion file
@@ -1073,7 +1316,7 @@ save_processed_data <- function(data, filename, format = "rds", output_dir = "da
       
       # Save workbook
       openxlsx::saveWorkbook(wb, filepath, overwrite = TRUE)
-      cat(sprintf("[SAVE] ✓ Saved Excel: %d samples, 2 sheets\n", nrow(wide_data)))
+      cat(sprintf("[SAVE] [OK] Saved Excel: %d samples, 2 sheets\n", nrow(wide_data)))
       
     } else {
       return(list(
@@ -1185,14 +1428,14 @@ save_metadata_file <- function(data, filepath) {
     sprintf("Processing Time: %s", data$processing_time),
     "",
     "## Processing Parameters",
-    sprintf("Temperature Range: [%.1f, %.1f]°C", 
+    sprintf("Temperature Range: [%.1f, %.1f]C", 
             data$processing_params$temp_min, 
             data$processing_params$temp_max),
     sprintf("Window Size: %d", data$processing_params$window_size),
-    sprintf("Exclusion Zone: [%.1f, %.1f]°C",
+    sprintf("Exclusion Zone: [%.1f, %.1f]C",
             data$processing_params$exclusion_lower,
             data$processing_params$exclusion_upper),
-    sprintf("Grid Resolution: %.2f°C", data$processing_params$grid_resolution),
+    sprintf("Grid Resolution: %.2fC", data$processing_params$grid_resolution),
     sprintf("Point Selection: %s", data$processing_params$point_selection),
     "",
     "## Sample Details"
@@ -1204,7 +1447,7 @@ save_metadata_file <- function(data, filepath) {
     metadata_lines <- c(
       metadata_lines,
       sprintf("Sample %s:", sample_id),
-      sprintf("  - Endpoints: [%.1f, %.1f]°C", 
+      sprintf("  - Endpoints: [%.1f, %.1f]C", 
               sample$lower_endpoint, sample$upper_endpoint),
       sprintf("  - Manual Adjustment: %s", sample$manual_adjustment),
       sprintf("  - Has Signal: %s", sample$has_signal),
@@ -1215,7 +1458,7 @@ save_metadata_file <- function(data, filepath) {
   }
   
   writeLines(metadata_lines, filepath)
-  cat(sprintf("[SAVE] ✓ Metadata saved: %s\n", basename(filepath)))
+  cat(sprintf("[SAVE] [OK] Metadata saved: %s\n", basename(filepath)))
 }
 
 
@@ -1236,12 +1479,12 @@ create_metadata_dataframe <- function(data) {
       "Samples with Signal",
       "Samples without Signal",
       "Processing Time",
-      "Temperature Min (°C)",
-      "Temperature Max (°C)",
+      "Temperature Min (C)",
+      "Temperature Max (C)",
       "Window Size",
-      "Exclusion Lower (°C)",
-      "Exclusion Upper (°C)",
-      "Grid Resolution (°C)",
+      "Exclusion Lower (C)",
+      "Exclusion Upper (C)",
+      "Grid Resolution (C)",
       "Point Selection"
     ),
     Value = c(
@@ -1419,7 +1662,7 @@ delete_processed_data <- function(filepath) {
     
     # Delete main file
     file.remove(filepath)
-    cat(sprintf("[DELETE] ✓ Deleted: %s\n", basename(filepath)))
+    cat(sprintf("[DELETE] [OK] Deleted: %s\n", basename(filepath)))
     
     # Delete companion metadata file if it exists (for CSV)
     if (tolower(tools::file_ext(filepath)) == "csv") {
@@ -1428,7 +1671,7 @@ delete_processed_data <- function(filepath) {
       
       if (file.exists(metadata_path)) {
         file.remove(metadata_path)
-        cat(sprintf("[DELETE] ✓ Deleted metadata: %s\n", basename(metadata_path)))
+        cat(sprintf("[DELETE] [OK] Deleted metadata: %s\n", basename(metadata_path)))
       }
     }
     
@@ -1449,6 +1692,26 @@ delete_processed_data <- function(filepath) {
 
 # ==============================================================================
 # CALCULATE TLBPARAM METRICS
+# ==============================================================================
+#
+# Integration with the tlbparam package for thermogram metric calculations.
+# Converts processed data to tlbparam format and calculates user-selected
+# metrics from the 24 available options across 6 categories.
+#
+# Metric Categories:
+#   - Peak metrics (Peak 1-4, Peak Ratios)
+#   - Area metrics (AUC, partial AUCs)
+#   - Temperature metrics (Tm, TFM, TCM, Width)
+#   - Shape metrics (Asymmetry, Kurtosis)
+#   - Derivative metrics (First/Second derivatives)
+#   - Curve fit metrics (Gaussian parameters)
+#
+# Key function: calculate_tlbparam_metrics()
+#   - Validates processed data structure
+#   - Maps UI-friendly names to tlbparam names
+#   - Calls tlbparam::clean_thermograms()
+#   - Returns metrics data frame
+#
 # ==============================================================================
 
 #' Calculate Thermogram Metrics Using tlbparam
@@ -1486,7 +1749,7 @@ delete_processed_data <- function(filepath) {
 #'     \item `samples`: Named list of sample objects, each containing:
 #'       \itemize{
 #'         \item `sample_id`: Sample identifier string
-#'         \item `temp_on_grid`: Numeric vector of temperatures (°C)
+#'         \item `temp_on_grid`: Numeric vector of temperatures (C)
 #'         \item `dcp_baseline_subtracted`: Numeric vector of baseline-subtracted dCp values
 #'         \item Additional fields like `lower_endpoint`, `upper_endpoint`, etc.
 #'       }
@@ -1552,7 +1815,7 @@ calculate_tlbparam_metrics <- function(processed_data, selected_metrics) {
     return(NULL)
   }
   
-  cat(sprintf("[METRICS] Input validation: ✓ (%d samples, %d metrics)\n",
+  cat(sprintf("[METRICS] Input validation: [OK] (%d samples, %d metrics)\n",
               length(processed_data$samples), length(selected_metrics)))
   
   # MAP UI metric names to tlbparam names
@@ -1572,7 +1835,7 @@ calculate_tlbparam_metrics <- function(processed_data, selected_metrics) {
   for (metric in tolower(selected_metrics)) {
     if (metric %in% names(metric_mapping)) {
       tlbparam_metrics <- c(tlbparam_metrics, metric_mapping[[metric]])
-      cat(sprintf("[METRICS] ✓ Mapped '%s' → '%s'\n", metric, metric_mapping[[metric]]))
+      cat(sprintf("[METRICS] [OK] Mapped '%s' → '%s'\n", metric, metric_mapping[[metric]]))
     }
   }
   
@@ -1590,7 +1853,7 @@ calculate_tlbparam_metrics <- function(processed_data, selected_metrics) {
     return(NULL)
   }
   
-  cat(sprintf("[METRICS] ✓ Converted: %d samples × %d columns\n",
+  cat(sprintf("[METRICS] [OK] Converted: %d samples × %d columns\n",
               nrow(tlbparam_data), ncol(tlbparam_data)))
   
   # Call tlbparam::clean_thermograms with mapped metric names
@@ -1624,7 +1887,7 @@ calculate_tlbparam_metrics <- function(processed_data, selected_metrics) {
   for (tlbparam_name in tlbparam_metrics) {
     if (tlbparam_name %in% names(cleaned_data)) {
       cols_to_extract <- c(cols_to_extract, tlbparam_name)
-      cat(sprintf("[METRICS] ✓ Including '%s'\n", tlbparam_name))
+      cat(sprintf("[METRICS] [OK] Including '%s'\n", tlbparam_name))
     }
   }
   
@@ -1639,13 +1902,27 @@ calculate_tlbparam_metrics <- function(processed_data, selected_metrics) {
   }
   names(result) <- new_names
   
-  cat(sprintf("[METRICS] ✅ SUCCESS: %d samples × %d columns\n",
+  cat(sprintf("[METRICS] [OK] SUCCESS: %d samples × %d columns\n",
               nrow(result), ncol(result)))
   cat("[METRICS] ========================================\n\n")
   
   return(result)
 }
 
+
+# ==============================================================================
+# CSV FORMAT VALIDATION
+# ==============================================================================
+#
+# Provides detailed validation for CSV files with user-friendly error messages.
+# Helps users understand and fix format issues in their data files.
+#
+# Returns structured feedback with:
+#   - Errors:       Critical issues that prevent processing
+#   - Warnings:     Non-critical issues that may affect results
+#   - Suggestions:  Actionable advice for fixing problems
+#
+# ==============================================================================
 
 #' Validate CSV Format with Helpful Feedback
 #'
@@ -1849,5 +2126,3 @@ return_validation_result <- function(errors, warnings, suggestions) {
     message = HTML(paste(message_parts, collapse = ""))
   )
 }
-
-
