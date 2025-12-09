@@ -27,6 +27,7 @@ library(plotly)
 library(dplyr)
 library(readr)
 library(readxl)
+library(openxlsx)  # For Excel file creation with multiple sheets
 
 # === Force inclusion in manifest ===
 # These packages are used in processing_utils.R and must be in manifest
@@ -35,15 +36,31 @@ library(tlbparam)
 library(forecast)
 # === End manifest inclusion ===
 
-# Source utility files
-source("utils/theme.R")
-source("utils/data_utils.R")
-source("utils/processing_utils.R")
+# Source utility files using system.file for robustness
+app_dir <- if (file.exists("utils/theme.R")) {
+  "."  # We're already in inst/shiny-app
+} else if (file.exists("inst/shiny-app/utils/theme.R")) {
+  "inst/shiny-app"  # We're in package root
+} else {
+  stop("Cannot find utils directory!")
+}
+
+source(file.path(app_dir, "utils/theme.R"))
+source(file.path(app_dir, "utils/data_utils.R"))
+
+# Source processing utility files (split for maintainability)
+# Order matters due to dependencies between files
+source(file.path(app_dir, "utils/format_utils.R"))     # Format detection, validation, conversion
+source(file.path(app_dir, "utils/file_io_utils.R"))    # File reading/writing (depends on format_utils)
+source(file.path(app_dir, "utils/baseline_utils.R"))   # Baseline detection processing
+source(file.path(app_dir, "utils/metrics_utils.R"))    # tlbparam metric calculation
 
 # Source module files
-source("modules/mod_data_overview.R")
-source("modules/mod_review_endpoints.R")
-source("modules/mod_report_builder.R")
+source(file.path(app_dir, "modules/mod_upload_modal.R"))  # Sub-module for upload modal
+source(file.path(app_dir, "modules/mod_data_overview.R"))
+source(file.path(app_dir, "modules/mod_review_endpoints.R"))
+source(file.path(app_dir, "modules/mod_report_builder.R"))
+source(file.path(app_dir, "modules/mod_user_guide.R"))
 
 # ==============================================================================
 # USER INTERFACE
@@ -62,7 +79,7 @@ ui <- page_navbar(
     bg = "white"
   ),
   
-  padding = c("64px", 0, 0, 0),  # Bootstrap’s default navbar height ≈ 56px
+  padding = c("64px", 0, 0, 0),  # Bootstrap's default navbar height ~ 56px
   
   # Header content (scripts, CSS, etc.)
   header = tagList(
@@ -117,6 +134,14 @@ ui <- page_navbar(
     icon = icon("file-export"),
     value = "report_builder",
     mod_report_builder_ui("report_builder")
+  ),
+  
+  # Tab 4: User Guide
+  nav_panel(
+    title = "User Guide",
+    icon = icon("book-open"),
+    value = "user_guide",
+    mod_user_guide_ui("user_guide")
   )
 )
 
@@ -156,6 +181,7 @@ server <- function(input, output, session) {
     # Phase 7-8: Dataset tracking and navigation
     current_dataset_id = NULL,          # Unique ID of active dataset
     current_dataset_name = NULL,        # Display name of active dataset
+    all_datasets = list(),              # All datasets (synced from Data Overview)
     dataset_load_trigger = 0,           # Incremented to trigger module updates
     navigate_to = NULL,                 # Target tab for programmatic navigation
     
@@ -171,6 +197,7 @@ server <- function(input, output, session) {
   mod_data_overview_server("data_overview", app_data)
   mod_review_endpoints_server("review_endpoints", app_data)
   mod_report_builder_server("report_builder", app_data)
+  mod_user_guide_server("user_guide", app_data)
   
   # ----------------------------------------------------------------------------
   # Cross-Module Navigation Handler

@@ -71,3 +71,8 @@ data-raw/
 
 # Reports
 inst/shiny-app/reports/
+
+# Data directories (user-generated, not for version control)
+inst/shiny-app/data/
+inst/shiny-app/example_data/
+tests/

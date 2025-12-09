@@ -55,7 +55,7 @@ mod_report_builder_ui <- function(id) {
       class = "container-fluid p-3",
       
       # ========================================================================
-      # Dataset Information Card (Compact)
+      # Dataset Information Card (with Dataset Selector)
       # ========================================================================
       div(
         class = "card mb-3",
@@ -65,6 +65,17 @@ mod_report_builder_ui <- function(id) {
         ),
         div(
           class = "card-body py-2",
+          # Dataset selector dropdown
+          div(
+            class = "mb-2",
+            selectInput(
+              ns("dataset_selector"),
+              label = NULL,
+              choices = c("Loading..." = ""),
+              width = "100%"
+            )
+          ),
+          # Dataset stats display
           uiOutput(ns("dataset_info_display"))
         )
       ),
@@ -181,6 +192,108 @@ mod_report_builder_server <- function(id, app_data) {
     
     # Calculation in progress flag
     calculating <- reactiveVal(FALSE)
+    
+    # ==========================================================================
+    # Dataset Selector
+    # ==========================================================================
+    
+    # Get list of processed datasets for the selector dropdown
+    processed_datasets_choices <- reactive({
+      datasets <- app_data$all_datasets
+      
+      if (is.null(datasets) || length(datasets) == 0) {
+        return(c("No datasets available" = ""))
+      }
+      
+      # Filter to only processed/loaded datasets (have processed_data)
+      processed <- Filter(function(d) {
+        d$status %in% c("processed", "loaded") && 
+          !is.null(d$processed_data) &&
+          !is.null(d$processed_data$samples)
+      }, datasets)
+      
+      if (length(processed) == 0) {
+        return(c("No processed datasets" = ""))
+      }
+      
+      # Create named vector: display name -> dataset ID
+      choices <- sapply(processed, function(d) d$id)
+      names(choices) <- sapply(processed, function(d) {
+        n_samples <- length(d$processed_data$samples)
+        sprintf("%s (%d samples)", d$file_name, n_samples)
+      })
+      
+      choices
+    })
+    
+    # Update dataset selector choices when datasets change
+    observe({
+      choices <- processed_datasets_choices()
+      current_id <- app_data$current_dataset_id
+      
+      # Set selected value to current dataset if available
+      selected <- if (!is.null(current_id) && current_id %in% choices) {
+        current_id
+      } else if (length(choices) > 0 && choices[1] != "") {
+        choices[1]
+      } else {
+        NULL
+      }
+      
+      updateSelectInput(
+        session,
+        "dataset_selector",
+        choices = choices,
+        selected = selected
+      )
+      
+      cat(sprintf("[REPORT_BUILDER] Updated dataset selector: %d choices\n", length(choices)))
+    })
+    
+    # Handle dataset selection change
+    observeEvent(input$dataset_selector, {
+      selected_id <- input$dataset_selector
+      
+      # Skip if empty or placeholder selection
+      if (is.null(selected_id) || selected_id == "") {
+        return()
+      }
+      
+      # Skip if already the current dataset
+      if (!is.null(app_data$current_dataset_id) && 
+          selected_id == app_data$current_dataset_id) {
+        return()
+      }
+      
+      cat(sprintf("\n[REPORT_BUILDER] Dataset selection changed to: %s\n", selected_id))
+      
+      # Get the dataset
+      datasets <- app_data$all_datasets
+      dataset <- datasets[[selected_id]]
+      
+      if (is.null(dataset)) {
+        showNotification("Selected dataset not found", type = "error", duration = 3)
+        return()
+      }
+      
+      # Update app_data with selected dataset
+      app_data$current_dataset_id <- selected_id
+      app_data$current_dataset_name <- dataset$file_name
+      app_data$processed_data <- dataset$processed_data
+      
+      # Clear existing metrics since dataset changed
+      calculated_metrics(NULL)
+      data_hash_at_calculation(NULL)
+      
+      cat(sprintf("[REPORT_BUILDER] Switched to dataset: %s\n", dataset$file_name))
+      cat(sprintf("[REPORT_BUILDER] Samples: %d\n", length(dataset$processed_data$samples)))
+      
+      showNotification(
+        sprintf("Switched to: %s", dataset$file_name),
+        type = "message",
+        duration = 2
+      )
+    }, ignoreInit = TRUE)
     
     # ==========================================================================
     # Helper Functions
@@ -376,25 +489,25 @@ mod_report_builder_server <- function(id, app_data) {
           list(
             key = "peak_1",
             label = "Peak 1",
-            tooltip = "Height of peak in region 60-66°C",
+            tooltip = "Height of peak in region 60-66ÂC",
             default = TRUE
           ),
           list(
             key = "peak_2",
             label = "Peak 2",
-            tooltip = "Height of peak in region 67-73°C",
+            tooltip = "Height of peak in region 67-73ÂC",
             default = TRUE
           ),
           list(
             key = "peak_3",
             label = "Peak 3",
-            tooltip = "Height of peak in region 73-81°C",
+            tooltip = "Height of peak in region 73-81ÂC",
             default = TRUE
           ),
           list(
             key = "peak_f",
             label = "Peak F (Fibrinogen)",
-            tooltip = "Height of peak in Fibrinogen region (47-60°C)",
+            tooltip = "Height of peak in Fibrinogen region (47-60ÂC)",
             default = FALSE
           )
         ),
@@ -403,25 +516,25 @@ mod_report_builder_server <- function(id, app_data) {
           list(
             key = "tpeak_1",
             label = "T Peak 1",
-            tooltip = "Temperature of Peak 1 (°C)",
+            tooltip = "Temperature of Peak 1 (ÂC)",
             default = TRUE
           ),
           list(
             key = "tpeak_2",
             label = "T Peak 2",
-            tooltip = "Temperature of Peak 2 (°C)",
+            tooltip = "Temperature of Peak 2 (ÂC)",
             default = TRUE
           ),
           list(
             key = "tpeak_3",
             label = "T Peak 3",
-            tooltip = "Temperature of Peak 3 (°C)",
+            tooltip = "Temperature of Peak 3 (ÂC)",
             default = TRUE
           ),
           list(
             key = "tpeak_f",
             label = "T Peak F (Fibrinogen)",
-            tooltip = "Temperature of Fibrinogen peak (°C)",
+            tooltip = "Temperature of Fibrinogen peak (ÂC)",
             default = FALSE
           )
         ),
@@ -457,7 +570,7 @@ mod_report_builder_server <- function(id, app_data) {
           list(
             key = "tv12",
             label = "TV1.2",
-            tooltip = "Temperature of valley between Peak 1 and Peak 2 (°C)",
+            tooltip = "Temperature of valley between Peak 1 and Peak 2 (ÂC)",
             default = FALSE
           ),
           list(
@@ -490,13 +603,13 @@ mod_report_builder_server <- function(id, app_data) {
           list(
             key = "tmax",
             label = "TMax",
-            tooltip = "Temperature at maximum height (°C)",
+            tooltip = "Temperature at maximum height (ÂC)",
             default = TRUE
           ),
           list(
             key = "tfm",
             label = "TFM",
-            tooltip = "Temperature of first moment (°C)",
+            tooltip = "Temperature of first moment (ÂC)",
             default = FALSE
           ),
           list(
@@ -523,7 +636,7 @@ mod_report_builder_server <- function(id, app_data) {
           list(
             key = "tmin",
             label = "TMin",
-            tooltip = "Temperature at minimum (°C)",
+            tooltip = "Temperature at minimum (ÂC)",
             default = FALSE
           ),
           list(
@@ -539,7 +652,18 @@ mod_report_builder_server <- function(id, app_data) {
       category_uis <- lapply(names(metric_categories), function(category_name) {
         
         metrics <- metric_categories[[category_name]]
-        category_id <- gsub("[^A-Za-z0-9]", "_", tolower(category_name))
+        
+        # Create clean category ID: 
+        # - Remove parentheses and their content
+        # - Convert spaces/special chars to underscores
+        # - Collapse multiple underscores
+        # "Global Metrics (Primary)" -> "global_metrics"
+        # "Additional Metrics" -> "additional_metrics"
+        category_id <- gsub("\\s*\\([^)]*\\)", "", category_name)  # Remove (content)
+        category_id <- gsub("[^A-Za-z0-9]+", "_", category_id)     # Non-alphanumeric to _
+        category_id <- gsub("_+", "_", category_id)                # Collapse multiple _
+        category_id <- gsub("^_|_$", "", category_id)              # Remove leading/trailing _
+        category_id <- tolower(category_id)
         
         div(
           class = "card mb-2",
@@ -657,14 +781,14 @@ mod_report_builder_server <- function(id, app_data) {
       })
     })
     
-    # Global Metrics (Primary)
-    observeEvent(input$select_all_global_metrics_primary, {
+    # Global Metrics (was "Global Metrics (Primary)" -> now "global_metrics")
+    observeEvent(input$select_all_global_metrics, {
       lapply(c("max_dcp", "tmax", "tfm", "width", "area"), function(key) {
         shinyjs::runjs(sprintf("$('#%s').prop('checked', true);", ns(paste0("metric_", key))))
       })
     })
     
-    observeEvent(input$clear_all_global_metrics_primary, {
+    observeEvent(input$clear_all_global_metrics, {
       lapply(c("max_dcp", "tmax", "tfm", "width", "area"), function(key) {
         shinyjs::runjs(sprintf("$('#%s').prop('checked', false);", ns(paste0("metric_", key))))
       })
@@ -820,7 +944,7 @@ mod_report_builder_server <- function(id, app_data) {
         calculated_metrics(result)
         data_hash_at_calculation(calculate_data_hash())
         
-        cat(sprintf("[REPORT_BUILDER] ✅ Success: %d samples, %d metrics\n",
+        cat(sprintf("[REPORT_BUILDER] [OK] Success: %d samples, %d metrics\n",
                     nrow(result), ncol(result) - 1))
         
         removeNotification("calc_progress")
@@ -831,7 +955,7 @@ mod_report_builder_server <- function(id, app_data) {
         )
         
       }, error = function(e) {
-        cat(sprintf("[REPORT_BUILDER] ❌ Error: %s\n", e$message))
+        cat(sprintf("[REPORT_BUILDER] âŒ Error: %s\n", e$message))
         removeNotification("calc_progress")
         showNotification(
           HTML(sprintf(
@@ -986,10 +1110,16 @@ mod_report_builder_server <- function(id, app_data) {
           stringsAsFactors = FALSE
         )
         
-        writexl::write_xlsx(
-          list(Metrics = metrics, Metadata = metadata_sheet),
-          path = file
-        )
+        # Use openxlsx for Excel file creation (consistent with rest of app)
+        wb <- openxlsx::createWorkbook()
+        
+        openxlsx::addWorksheet(wb, "Metrics")
+        openxlsx::writeData(wb, "Metrics", metrics)
+        
+        openxlsx::addWorksheet(wb, "Metadata")
+        openxlsx::writeData(wb, "Metadata", metadata_sheet)
+        
+        openxlsx::saveWorkbook(wb, file, overwrite = TRUE)
         
         cat(sprintf("[REPORT_BUILDER] Direct Excel download: %s\n", basename(file)))
       }
@@ -1013,21 +1143,36 @@ mod_report_builder_server <- function(id, app_data) {
         return()
       }
       
-      result <- export_report_csv(
-        metrics_data = metrics,
-        report_name = trimws(input$report_name),
-        dataset_name = app_data$current_dataset_name %||% "Unknown"
-      )
+      # Generate filename
+      report_name <- trimws(input$report_name)
+      if (is.null(report_name) || nchar(report_name) == 0) {
+        report_name <- "thermogram_report"
+      }
+      report_name <- gsub("[^A-Za-z0-9_-]", "_", report_name)
+      filename <- sprintf("%s_%s.csv", report_name, format(Sys.time(), "%Y%m%d_%H%M%S"))
       
-      if (result$success) {
+      # Create reports directory if needed
+      reports_dir <- "reports"
+      if (!dir.exists(reports_dir)) {
+        dir.create(reports_dir, recursive = TRUE)
+        cat(sprintf("[REPORT_BUILDER] Created directory: %s\n", reports_dir))
+      }
+      
+      filepath <- file.path(reports_dir, filename)
+      
+      # Write CSV
+      tryCatch({
+        readr::write_csv(metrics, filepath)
+        cat(sprintf("[REPORT_BUILDER] CSV saved: %s\n", filepath))
         
+        # Track the report
         report_id <- paste0("report_", format(Sys.time(), "%Y%m%d_%H%M%S"))
         
         app_data$generated_reports[[report_id]] <- list(
           id = report_id,
-          name = tools::file_path_sans_ext(result$filename),
+          name = tools::file_path_sans_ext(filename),
           format = "csv",
-          filepath = result$filepath,
+          filepath = filepath,
           dataset_name = app_data$current_dataset_name %||% "Unknown",
           n_samples = nrow(metrics),
           n_metrics = ncol(metrics) - 1,
@@ -1039,7 +1184,7 @@ mod_report_builder_server <- function(id, app_data) {
         showNotification(
           HTML(sprintf(
             "<strong>CSV Saved!</strong><br/>File: %s<br/>Location: reports/<br/>View in Data Overview",
-            result$filename
+            filename
           )),
           type = "message",
           duration = 8
@@ -1047,13 +1192,14 @@ mod_report_builder_server <- function(id, app_data) {
         
         updateTextInput(session, "report_name", value = "")
         
-      } else {
+      }, error = function(e) {
+        cat(sprintf("[REPORT_BUILDER] CSV export error: %s\n", e$message))
         showNotification(
-          sprintf("Export failed: %s", result$message),
+          sprintf("Export failed: %s", e$message),
           type = "error",
           duration = 10
         )
-      }
+      })
     })
     
     observeEvent(input$export_excel, {
@@ -1070,22 +1216,62 @@ mod_report_builder_server <- function(id, app_data) {
         return()
       }
       
-      result <- export_report_excel(
-        metrics_data = metrics,
-        report_name = trimws(input$report_name),
-        dataset_name = app_data$current_dataset_name %||% "Unknown"
+      # Generate filename
+      report_name <- trimws(input$report_name)
+      if (is.null(report_name) || nchar(report_name) == 0) {
+        report_name <- "thermogram_report"
+      }
+      report_name <- gsub("[^A-Za-z0-9_-]", "_", report_name)
+      filename <- sprintf("%s_%s.xlsx", report_name, format(Sys.time(), "%Y%m%d_%H%M%S"))
+      
+      # Create reports directory if needed
+      reports_dir <- "reports"
+      if (!dir.exists(reports_dir)) {
+        dir.create(reports_dir, recursive = TRUE)
+        cat(sprintf("[REPORT_BUILDER] Created directory: %s\n", reports_dir))
+      }
+      
+      filepath <- file.path(reports_dir, filename)
+      
+      # Create metadata sheet
+      dataset_name <- app_data$current_dataset_name %||% "Unknown"
+      metric_names <- setdiff(names(metrics), "Sample_ID")
+      
+      metadata_sheet <- data.frame(
+        Property = c("Report Generated", "Source Dataset", "Samples", "Metrics", "Metrics Included"),
+        Value = c(
+          format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+          dataset_name,
+          as.character(nrow(metrics)),
+          as.character(length(metric_names)),
+          paste(metric_names, collapse = ", ")
+        ),
+        stringsAsFactors = FALSE
       )
       
-      if (result$success) {
+      # Write Excel file
+      tryCatch({
+        wb <- openxlsx::createWorkbook()
         
+        openxlsx::addWorksheet(wb, "Metrics")
+        openxlsx::writeData(wb, "Metrics", metrics)
+        
+        openxlsx::addWorksheet(wb, "Metadata")
+        openxlsx::writeData(wb, "Metadata", metadata_sheet)
+        
+        openxlsx::saveWorkbook(wb, filepath, overwrite = TRUE)
+        
+        cat(sprintf("[REPORT_BUILDER] Excel saved: %s\n", filepath))
+        
+        # Track the report
         report_id <- paste0("report_", format(Sys.time(), "%Y%m%d_%H%M%S"))
         
         app_data$generated_reports[[report_id]] <- list(
           id = report_id,
-          name = tools::file_path_sans_ext(result$filename),
+          name = tools::file_path_sans_ext(filename),
           format = "xlsx",
-          filepath = result$filepath,
-          dataset_name = app_data$current_dataset_name %||% "Unknown",
+          filepath = filepath,
+          dataset_name = dataset_name,
           n_samples = nrow(metrics),
           n_metrics = ncol(metrics) - 1,
           generated_at = Sys.time()
@@ -1096,7 +1282,7 @@ mod_report_builder_server <- function(id, app_data) {
         showNotification(
           HTML(sprintf(
             "<strong>Excel Saved!</strong><br/>File: %s<br/>Location: reports/<br/>View in Data Overview",
-            result$filename
+            filename
           )),
           type = "message",
           duration = 8
@@ -1104,13 +1290,14 @@ mod_report_builder_server <- function(id, app_data) {
         
         updateTextInput(session, "report_name", value = "")
         
-      } else {
+      }, error = function(e) {
+        cat(sprintf("[REPORT_BUILDER] Excel export error: %s\n", e$message))
         showNotification(
-          sprintf("Export failed: %s", result$message),
+          sprintf("Export failed: %s", e$message),
           type = "error",
           duration = 10
         )
-      }
+      })
     })
     
   })
