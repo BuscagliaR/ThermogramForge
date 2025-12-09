@@ -1,9 +1,11 @@
 Package: ThermogramForge
 Title: Interactive Thermal Liquid Biopsy Thermogram Analysis
 Version: 0.1.0
-Authors@R: 
-    person("Chris", "Reger", , "kcr28@nau.edu", role = c("aut", "cre"),
-           comment = c(ORCID = "0009-0007-4312-7844"))
+Authors@R: c(
+    person("Karl", "Reger", , "kcr28@nau.edu", role = c("aut", "cre"),
+           comment = c(ORCID = "0009-0007-4312-7844")),
+    person("Robert", "Buscaglia", , "Robert.Buscaglia@nau.edu", role = "aut")
+    )
 Description: An R Shiny web application for analyzing thermal liquid biopsy (TLB) 
     thermogram data. Provides interactive baseline endpoint detection and adjustment,
     automated signal quality detection, comprehensive metric calculation, and 
@@ -12,11 +14,12 @@ Description: An R Shiny web application for analyzing thermal liquid biopsy (TLB
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.2.3
+RoxygenNote: 7.3.3
 Depends:
     R (>= 4.1.0)
 Imports:
-    shiny (>= 1.11.0),
+    shiny (>= 1.7.0)
+Suggests:
     DT (>= 0.20),
     plotly (>= 4.10),
     dplyr (>= 1.0.0),
@@ -24,9 +27,10 @@ Imports:
     readr (>= 2.1.0),
     readxl (>= 1.4.0),
     writexl (>= 1.4.0),
+    openxlsx (>= 4.2.0),
     shinyWidgets (>= 0.7.0),
     shinyjs (>= 2.1.0),
-    bslib (>= 0.9.0),
+    bslib (>= 0.6.0),
     htmltools (>= 0.5.0),
     jsonlite (>= 1.8.0),
     logger (>= 0.2.0),
@@ -36,8 +40,7 @@ Imports:
     openxlsx (>= 4.2.0),
     ThermogramBaseline,
     tlbparam,
-    forecast
-Suggests:
+    forecast,
     testthat (>= 3.1.0),
     shinytest2 (>= 0.2.0),
     mockery (>= 0.4.0),

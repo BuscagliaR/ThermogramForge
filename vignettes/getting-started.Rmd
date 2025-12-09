@@ -1,0 +1,250 @@
+---
+title: "Getting Started with ThermogramForge"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with ThermogramForge}
+
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+## Introduction
+
+ThermogramForge is an interactive R Shiny application for analyzing thermal liquid 
+biopsy (TLB) thermogram data from differential scanning calorimetry (DSC) experiments. 
+This vignette will guide you through installation, launching the application, and 
+completing your first analysis workflow.
+
+## Installation
+
+### Prerequisites
+
+ThermogramForge requires:
+
+- **R** version 4.1.0 or higher
+- **RStudio** (recommended for the best experience)
+
+### Installing from GitHub
+
+```{r install, eval = FALSE}
+# Install remotes if you don't have it
+install.packages("remotes")
+
+# Install ThermogramForge and its dependencies
+remotes::install_github("BuscagliaR/ThermogramForge")
+```
+This will also install the required dependency packages:
+
+- **ThermogramBaseline** - Automated baseline endpoint detection
+- **tlbparam** - Thermogram metric calculations
+
+## Launching the Application
+
+Once installed, launch ThermogramForge with:
+
+```{r launch, eval = FALSE}
+library(ThermogramForge)
+run_app()
+```
+
+The application will open in your default web browser. You can also specify options:
+
+```{r launch-options, eval = FALSE}
+# Launch on a specific port
+run_app(port = 3838)
+
+# Launch without opening browser (for server deployment)
+run_app(launch.browser = FALSE)
+```
+
+## Application Overview
+
+ThermogramForge consists of four main tabs:
+
+| Tab | Purpose |
+|-----|---------|
+| **Data Overview** | Upload, process, save, and manage datasets |
+| **Review Endpoints** | Inspect and adjust baseline endpoints for each sample |
+| **Report Builder** | Calculate metrics and export reports |
+| **User Guide** | In-app documentation and help |
+
+## Preparing Your Data
+
+ThermogramForge accepts CSV and Excel files in three formats:
+
+### Format 1: Single Sample
+
+Two columns with temperature and heat capacity:
+
+| Temperature | dCp |
+|-------------|-----|
+| 45.0 | 0.0012 |
+| 45.5 | 0.0015 |
+| 46.0 | 0.0018 |
+
+### Format 2: Multi-Sample Long
+
+Multiple samples stacked vertically with an identifier column:
+
+| Sample_ID | Temperature | dCp |
+|-----------|-------------|-----|
+| Sample_A | 45.0 | 0.0012 |
+| Sample_A | 45.5 | 0.0015 |
+| Sample_B | 45.0 | 0.0018 |
+| Sample_B | 45.5 | 0.0021 |
+
+### Format 3: Multi-Sample Wide
+
+Paired temperature and dCp columns for each sample:
+
+| T1a | 1a | T1b | 1b | T2a | 2a |
+|-----|-----|-----|-----|-----|-----|
+| 45.0 | 0.0012 | 45.0 | 0.0018 | 45.0 | 0.0015 |
+| 45.5 | 0.0015 | 45.5 | 0.0021 | 45.5 | 0.0018 |
+
+Temperature columns are prefixed with "T" followed by the sample ID.
+
+### Data Requirements
+
+- Temperature values should be in degrees Celsius (°C)
+- dCp values should be in cal/°C·g (or equivalent units)
+- No missing temperature values
+- Files up to 150 MB are supported
+
+## Complete Workflow Tutorial
+
+### Step 1: Upload Data
+
+1. Navigate to the **Data Overview** tab
+2. Click **"Upload New Raw Thermogram Data"**
+3. Select your CSV or Excel file
+4. Review the data preview to confirm correct parsing
+5. Click **"Upload"** to confirm
+
+Your dataset will appear in the "Unprocessed Datasets" section.
+
+### Step 2: Process Data
+
+1. Find your uploaded dataset in the list
+2. Click the **"Process Data"** button next to it
+3. Wait for processing to complete (a progress indicator will appear)
+4. Review the processing summary showing:
+   - Total samples processed
+   - Samples with detected signal
+   - Any processing warnings
+
+The dataset will move to the "Processed Datasets" section.
+
+### Step 3: Review Endpoints
+
+1. Click **"Review Endpoints"** on your processed dataset
+2. The Review Endpoints tab will open with your data loaded
+
+**Sample Grid:**
+
+- View all samples with their endpoint values
+- **Signal** column shows automated signal detection results (✓ = signal detected)
+- **Reviewed** checkbox to mark samples you've inspected
+- **Exclude** checkbox to remove samples from reports
+
+**Visualization:**
+
+- Toggle between "Baseline Subtracted" and "Raw Thermogram" views
+- Blue vertical lines show the detected baseline endpoints
+- Endpoint badges show whether values are Auto (automatic) or Manual (adjusted)
+
+**Manual Adjustment:**
+
+If an endpoint needs correction:
+
+1. Click **"Manually Adjust Lower Endpoint"** or **"Manually Adjust Upper Endpoint"**
+2. Click on the plot at the desired temperature
+3. The baseline will recalculate automatically
+4. Use **Undo/Redo** buttons if needed
+
+**Navigation:**
+
+- Use **Previous/Next** buttons to move between samples
+- Or click directly on a row in the sample grid
+
+### Step 4: Generate Reports
+
+1. Navigate to the **Report Builder** tab
+2. Select your processed dataset from the dropdown
+3. Choose metrics to calculate:
+   - **Peak Heights**: Maximum dCp values at key temperatures
+   - **Peak Temperatures**: Temperatures where peaks occur
+   - **Peak Ratios**: Relationships between peak values
+   - **Shape Parameters**: FWHM, asymmetry, kurtosis
+   - **Area Metrics**: Integrated areas under curves
+   - **First Moment**: Center of mass calculations
+
+4. Click **"Generate Report"**
+5. Review the preview table
+6. Export as CSV or Excel
+
+### Step 5: Save Your Work
+
+To preserve your work for later:
+
+1. Return to the **Data Overview** tab
+2. Click **"Save to Disk"** on your processed dataset
+3. Choose a format:
+   - **RDS** - Full data, can be reloaded with all adjustments preserved
+   - **CSV** - Wide format export, read-only
+   - **Excel** - Wide format with metadata sheet, read-only
+
+**Important:** Only RDS format preserves manual endpoint adjustments and can be 
+fully reloaded. CSV and Excel exports are for data sharing and downstream analysis.
+
+## Tips and Best Practices
+
+### Efficient Review Workflow
+
+1. **Sort by Signal column** - Review "No Signal" samples first to quickly exclude noise-only data
+2. **Use keyboard shortcuts** - Navigate with arrow keys when the grid is focused
+3. **Batch exclusion** - Mark all low-quality samples as excluded before generating reports
+4. **Save frequently** - Save to RDS format periodically to preserve your work
+
+### Handling Large Datasets
+
+- For datasets with 100+ samples, processing may take several minutes
+- Use the "Reviewed" checkbox to track your progress
+- Consider processing in batches if memory is limited
+
+### Troubleshooting
+
+**"Cannot find utils directory" error:**
+The package may not be properly installed. Try reinstalling:
+```{r reinstall, eval = FALSE}
+remotes::install_github("BuscagliaR/ThermogramForge", force = TRUE)
+```
+
+**Plots not rendering:**
+Ensure your browser allows JavaScript. Try a different browser if issues persist.
+  
+**Upload fails silently:**
+Check that your file follows one of the supported formats exactly. Column names 
+are case-sensitive.
+
+## Next Steps
+
+- Read the **Scientific Methods** vignette to understand the algorithms
+- Explore the in-app **User Guide** tab for detailed feature documentation
+- Visit the [GitHub repository](https://github.com/BuscagliaR/ThermogramForge) 
+  to report issues or request features
+
+## Session Info
+
+```{r session, eval = FALSE}
+sessionInfo()
+```

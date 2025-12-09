@@ -1,0 +1,306 @@
+---
+title: "Scientific Methods: Algorithms and Metrics"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Scientific Methods: Algorithms and Metrics}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+## Introduction
+
+This vignette describes the scientific methods implemented in ThermogramForge for 
+thermal liquid biopsy (TLB) thermogram analysis. Understanding these algorithms 
+is essential for interpreting results and ensuring appropriate application to 
+your research.
+
+ThermogramForge implements two key algorithms from the ThermogramBaseline package:
+
+1. **Automated Baseline Correction** - Identifies stable pre- and post-transition 
+   regions for baseline subtraction
+2. **Signal Detection** - Determines whether a thermogram contains interpretable 
+   thermal transitions
+
+Additionally, the tlbparam package provides comprehensive metric calculations for 
+quantitative analysis.
+
+## Differential Scanning Calorimetry Background
+
+Differential scanning calorimetry (DSC) measures heat capacity changes as a 
+sample is heated. For blood plasma samples, the resulting thermogram reflects 
+the composite thermal behavior of plasma proteins. Disease states can alter 
+protein composition and stability, producing characteristic changes in the 
+thermogram shape.
+
+A typical plasma thermogram shows:
+
+- **Pre-transition region** (~45-55°C): Stable baseline before protein unfolding
+- **Primary transition** (~60-75°C): Main protein denaturation peak
+- **Post-transition region** (~80-90°C): Return to baseline after unfolding
+- **Secondary features**: Shoulders or subsidiary peaks reflecting specific proteins
+
+## Baseline Correction Algorithm
+
+### Overview
+
+Raw thermograms contain instrumental baseline drift that must be removed before 
+quantitative analysis. The baseline correction algorithm automatically identifies 
+the most stable regions before and after the thermal transition to define 
+baseline endpoints.
+
+### Algorithm Steps
+
+#### Step 1: Define Exclusion Region
+
+The exclusion region (default: 48-81°C) contains the thermal transition and is 
+excluded from baseline endpoint selection. This ensures endpoints are selected 
+only from stable pre- and post-transition regions.
+
+#### Step 2: Spline Fitting
+
+A smoothing spline is fitted to the pre-transition segment (temperatures below 
+the exclusion region). The spline captures the underlying baseline trend while 
+smoothing high-frequency noise.
+$$
+\hat{y} = \text{smooth.spline}(T, C_p)
+$$
+
+#### Step 3: Residual Calculation
+
+Residuals are calculated as the difference between observed and fitted values:
+
+$$
+r_i = C_{p,i} - \hat{C}_{p,i}
+$$
+
+#### Step 4: Rolling Variance Analysis
+
+A moving window (default: 5 points) calculates local variance across the residuals:
+
+$$
+\sigma^2_w = \frac{1}{n_w} \sum_{i \in w} (r_i - \bar{r}_w)^2
+$$
+
+The region with minimum rolling variance represents the most stable baseline 
+segment.
+
+#### Step 5: Endpoint Selection
+
+Three endpoint selection strategies are available:
+
+| Strategy | Description |
+|----------|-------------|
+| **Innermost** (default) | Selects the point closest to the exclusion region |
+| **Midpoint** | Selects the center of the most stable segment |
+| **Outermost** | Selects the point farthest from the exclusion region |
+
+The innermost strategy typically provides the best agreement with manual 
+baseline selection by experienced analysts.
+
+#### Step 6: Baseline Subtraction
+
+Once endpoints are identified, a baseline model is constructed:
+
+1. Smooth splines are fitted to pre- and post-transition segments
+2. A linear segment connects the endpoints across the exclusion region
+3. The complete baseline is subtracted from the raw thermogram
+
+#### Step 7: Interpolation
+
+The baseline-subtracted thermogram is interpolated onto a standard temperature 
+grid (default: 45-90°C in 0.1°C increments) for consistent comparison across 
+samples.
+
+### Algorithm Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `grid.temp` | seq(45, 90, 0.1) | Output temperature grid |
+| `exclusion` | c(48, 81) | Exclusion region boundaries |
+| `inner.outer` | "inner" | Endpoint selection strategy |
+| `window` | 5 | Rolling variance window size |
+
+## Signal Detection Algorithm
+
+### Purpose
+
+Not all thermograms contain interpretable thermal transitions. Samples may show 
+only noise due to:
+
+- Low protein concentration
+- Sample degradation
+- Instrumental issues
+- Air bubbles or contamination
+
+The signal detection algorithm classifies thermograms as "Signal" or "No Signal" 
+to focus analysis on interpretable data.
+
+### Methodology
+
+The algorithm uses ARIMA (AutoRegressive Integrated Moving Average) modeling to 
+test for stationarity in the baseline-subtracted thermogram.
+
+#### Step 1: ARIMA Model Fitting
+
+An ARIMA model is automatically selected and fitted to the baseline-subtracted 
+data using the `auto.arima()` function from the forecast package.
+
+#### Step 2: Stationarity Assessment
+
+The fitted model's integration order (d parameter) indicates stationarity:
+
+- **d = 0**: Data is stationary (no signal, noise only)
+- **d ≥ 1**: Data is non-stationary (signal present)
+
+A thermogram with a true thermal transition will show non-stationary behavior 
+(trending away from and back to baseline), while pure noise will appear 
+stationary.
+
+### Interpretation
+
+| Classification | Meaning | Recommended Action |
+|----------------|---------|-------------------|
+| **Signal** | Thermal transition detected | Include in analysis |
+| **No Signal** | No interpretable transition | Review manually, consider excluding |
+
+**Important:** Signal detection is a screening tool, not a definitive classification. 
+Always visually inspect flagged samples before excluding them.
+
+## Metric Calculations
+
+ThermogramForge calculates 24 metrics across 6 categories using the tlbparam 
+package. All metrics are calculated from baseline-subtracted, interpolated 
+thermograms.
+
+### Peak Heights
+
+Peak height metrics measure the maximum heat capacity (dCp) at specific 
+temperatures or regions.
+
+| Metric | Description | Typical Range |
+|--------|-------------|---------------|
+| `Peak_1` | Maximum dCp in 50-60°C region | Variable |
+| `Peak_2` | Maximum dCp in 60-70°C region (primary peak) | 0.05-0.3 cal/°C·g |
+| `Peak_3` | Maximum dCp in 70-80°C region | Variable |
+| `Peak_F` | Global maximum dCp | 0.1-0.4 cal/°C·g |
+
+### Peak Temperatures
+
+Temperature locations of peak maxima.
+
+| Metric | Description | Typical Range |
+|--------|-------------|---------------|
+| `TPeak_1` | Temperature of Peak_1 | 50-60°C |
+| `TPeak_2` | Temperature of Peak_2 | 62-68°C |
+| `TPeak_3` | Temperature of Peak_3 | 70-80°C |
+| `TPeak_F` | Temperature of global maximum | 62-70°C |
+
+### Peak Ratios
+
+Ratios between peak heights reveal relative contributions of different 
+protein populations.
+
+| Metric | Description | Interpretation |
+|--------|-------------|----------------|
+| `Ratio_12` | Peak_1 / Peak_2 | Low-temp vs. main peak |
+| `Ratio_13` | Peak_1 / Peak_3 | Low-temp vs. high-temp |
+| `Ratio_23` | Peak_2 / Peak_3 | Main peak vs. high-temp |
+| `Ratio_1F` | Peak_1 / Peak_F | Low-temp vs. global max |
+| `Ratio_2F` | Peak_2 / Peak_F | Main peak vs. global max |
+| `Ratio_3F` | Peak_3 / Peak_F | High-temp vs. global max |
+
+### Shape Parameters
+
+Metrics describing the overall shape of the thermogram.
+
+| Metric | Description | Interpretation |
+|--------|-------------|----------------|
+| `FWHM` | Full Width at Half Maximum | Peak broadness (°C) |
+| `Asymmetry` | Skewness of peak shape | Left/right asymmetry |
+| `Kurtosis` | Peakedness of distribution | Sharp vs. broad peak |
+
+### Area Metrics
+
+Integrated areas under the thermogram curve.
+
+| Metric | Description | Units |
+|--------|-------------|-------|
+| `Total_Area` | Total integrated area | cal/g |
+| `Area_1` | Area in 50-60°C region | cal/g |
+| `Area_2` | Area in 60-70°C region | cal/g |
+| `Area_3` | Area in 70-80°C region | cal/g |
+
+### First Moment (Center of Mass)
+
+| Metric | Description | Interpretation |
+|--------|-------------|----------------|
+| `TFM` | Temperature First Moment | Center of mass (°C) |
+| `TFM_1` | First moment, 50-60°C region | Regional center |
+| `TFM_2` | First moment, 60-70°C region | Regional center |
+| `TFM_3` | First moment, 70-80°C region | Regional center |
+
+The first moment (TFM) is calculated as:
+
+$$
+T_{FM} = \frac{\sum_i T_i \cdot C_{p,i}}{\sum_i C_{p,i}}
+$$
+
+This represents the "center of mass" of the thermogram and is sensitive to 
+shifts in peak position.
+
+## Quality Control Recommendations
+
+### Visual Inspection
+
+Always visually inspect thermograms, especially those flagged by signal detection:
+
+1. **Check endpoint placement** - Are endpoints in stable regions?
+2. **Verify baseline quality** - Is the subtracted baseline flat outside transitions?
+3. **Assess noise level** - Is the signal-to-noise ratio adequate?
+4. **Look for artifacts** - Spikes, discontinuities, or unusual shapes?
+
+### Exclusion Criteria
+
+Consider excluding samples that show:
+
+- No detectable thermal transition (confirmed "No Signal")
+- Severely noisy data (SNR < 3)
+- Obvious instrumental artifacts
+- Endpoint detection failures (endpoints in transition region)
+
+### Batch Effects
+
+When analyzing multiple batches:
+
+- Process batches separately first
+- Compare baseline characteristics across batches
+- Consider batch correction if systematic differences exist
+
+## References
+
+For detailed algorithm validation and performance characteristics, see:
+
+> Reger KC, Schneider G, Line KT, et al. Automated baseline-correction and 
+> signal-detection algorithms with web-based implementation for Thermal Liquid 
+> Biopsy data analysis. *Cancers*. 2025;17(x):xxx.
+
+For background on thermal liquid biopsy methodology:
+
+> Garbett NC, Mekmaysy CS, Helm CW, Jenson AB, Chaires JB. Differential scanning 
+> calorimetry of blood plasma for clinical diagnosis and monitoring. 
+> *Experimental and Molecular Pathology*. 2009;86(3):186-191.
+
+## Session Info
+
+```{r session, eval = FALSE}
+sessionInfo()
+```

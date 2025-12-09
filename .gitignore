@@ -76,3 +76,5 @@ inst/shiny-app/reports/
 inst/shiny-app/data/
 inst/shiny-app/example_data/
 tests/
+/doc/
+/Meta/
