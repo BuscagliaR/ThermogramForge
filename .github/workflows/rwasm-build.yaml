@@ -1,0 +1,35 @@
+name: rwasm-build
+
+# Builds thermogramforge.core for webR and uploads the package repo as an
+# artifact. Keeping this on every push to v2 means a dependency that breaks
+# the wasm build is caught immediately, not at release time.
+
+on:
+  push:
+    branches: [v2]
+    paths: ["core/**", ".github/workflows/rwasm-build.yaml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wasm package repo
+        uses: r-wasm/actions/build-rwasm@v3
+        with:
+          packages: |
+            local::./core
+          repo-path: wasm-repo
+
+      - name: Build VFS library image
+        run: |
+          ls -R wasm-repo | head -50
+          test -n "$(ls wasm-repo/bin/emscripten/contrib/*/thermogramforge.core_* 2>/dev/null)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-repo
+          path: wasm-repo
+          retention-days: 14

@@ -1,0 +1,51 @@
+name: tauri-build
+
+# Manual: builds unsigned desktop bundles of the shinylive spike for macOS
+# and Windows. Expects a prebuilt spike/site (uploaded as an artifact named
+# "spike-site" by a prior run, or committed) until Phase 3 wires the full
+# export into CI.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - os: windows-latest
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Tauri CLI deps
+        working-directory: dist/tauri
+        run: npm ci
+
+      - name: Download site
+        uses: actions/download-artifact@v4
+        with:
+          name: spike-site
+          path: spike/site
+        continue-on-error: true
+
+      - uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: dist/tauri
+          args: ${{ matrix.args }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tauri-${{ matrix.os }}
+          path: |
+            dist/tauri/src-tauri/target/**/release/bundle/**

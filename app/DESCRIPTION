@@ -1,0 +1,15 @@
+Package: ThermogramForge
+Title: Shiny Interface for Thermal Liquid Biopsy Thermogram Analysis
+Version: 2.0.0.9000
+Authors@R: c(
+    person("Karl", "Reger", , "kcr28@nau.edu", role = c("aut", "cre")),
+    person("Robert", "Buscaglia", role = "aut"))
+Description: Shiny user interface over thermogramforge.core. Phase 0 stub.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 4.1)
+Imports:
+    shiny (>= 1.8.1),
+    bslib,
+    thermogramforge.core
+Remotes: local::../core

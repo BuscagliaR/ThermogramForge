@@ -41,7 +41,7 @@ vignettes/*.pdf
 .Renviron
 
 # pkgdown site
-docs/
+/docs/
 
 # translation temp files
 po/*~
@@ -64,7 +64,7 @@ data-raw/temp_*
 inst/shiny-app/temp_*
 
 # Test outputs
-tests/testthat/_snaps/
+/tests/testthat/_snaps/
 
 # Raw data
 data-raw/
@@ -75,6 +75,17 @@ inst/shiny-app/reports/
 # Data directories (user-generated, not for version control)
 inst/shiny-app/data/
 inst/shiny-app/example_data/
-tests/
+/tests/
 /doc/
 /Meta/
+
+# --- V2 (v2 branch) ---
+!/core/data-raw/
+/core/tests/testthat/fixtures/large/
+/spike/site/
+/spike/site-stub/
+/spike/shinylive-app/wasm-repo/
+/spike/shinylive-app/data/
+/dist/tauri/src-tauri/target/
+/dist/tauri/node_modules/
+/wasm-repo/
