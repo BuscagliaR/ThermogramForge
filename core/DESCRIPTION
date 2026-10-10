@@ -1,0 +1,26 @@
+Package: thermogramforge.core
+Title: Core Algorithms for Thermal Liquid Biopsy Thermogram Analysis
+Version: 0.0.0.9000
+Authors@R: c(
+    person("Karl", "Reger", , "kcr28@nau.edu", role = c("aut", "cre")),
+    person("Robert", "Buscaglia", role = "aut"))
+Description: Baseline-endpoint detection, baseline subtraction, signal
+    classification, and metric calculation for differential scanning
+    calorimetry thermograms of blood plasma. Pure R, no Shiny. Carries a
+    frozen reference implementation of the methods published in Reger et al.
+    (Cancers, 2025) alongside the current defaults.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Depends: R (>= 4.1)
+Imports:
+    S7 (>= 0.2.1),
+    forecast (>= 9.0),
+    stats,
+    utils
+Suggests:
+    testthat (>= 3.0.0),
+    waldo,
+    data.table
+Config/testthat/edition: 3
