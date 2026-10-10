@@ -1,6 +1,6 @@
 # The full V1 pipeline (endpoints -> baseline -> interpolation) must
-# reproduce the oracle's baseline-subtracted curve on the grid.
-# Strict identity locally; 1e-10 on CI (see helper-fixtures.R).
+# reproduce the oracle's baseline-subtracted curve on the grid: bit-identical
+# on the oracle's platform, within curve_abs_tol elsewhere (helper-fixtures.R).
 
 oracle_files <- list.files(fixture_path("oracle"), pattern = "__.*\\.rds$",
                            full.names = TRUE)
@@ -20,7 +20,8 @@ for (f in oracle_files) {
       res <- suppressWarnings(process_sample_v1(
         s$temperature_original, s$dcp_original, endpoint_method = m,
         grid = s$temperature_grid, temp_min = p$temp_min, temp_max = p$temp_max))
-      expect_curve_equal(res$subtracted_grid, s$subtracted_grid)
+      expect_curve_equal(res$subtracted_grid, s$subtracted_grid,
+                         oracle_platform = o$versions$platform)
       expect_identical(res$lower, s$lower)
       expect_identical(res$upper, s$upper)
     }

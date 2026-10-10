@@ -7,15 +7,19 @@ test_that("wide CSV with BOM reads into the right samples", {
   expect_identical(n_samples(set), 2L)
 })
 
-test_that("wide CSV parses identically to V1's reader", {
-  # The oracle stores V1's parsed (and temperature-filtered) vectors.
+test_that("wide CSV parses the same values as V1's reader", {
+  # The oracle stores V1's parsed (readr, macOS) and temperature-filtered
+  # vectors. base read.csv matches them bit for bit on that platform and to
+  # within 1 ulp elsewhere (see helper-fixtures.R).
   set <- read_thermogram_csv(raw_fixture("SuperSmall.csv"))
   o <- readRDS(oracle_fixture("SuperSmall__default.rds"))
   for (id in names(o$samples)) {
     s <- set@samples[[id]]
     keep <- s$Temperature >= 20 & s$Temperature <= 110
-    expect_identical(s$Temperature[keep], o$samples[[id]]$temperature_original, info = id)
-    expect_identical(s$dCp[keep], o$samples[[id]]$dcp_original, info = id)
+    expect_input_equal(s$Temperature[keep], o$samples[[id]]$temperature_original,
+                       oracle_platform = o$versions$platform)
+    expect_input_equal(s$dCp[keep], o$samples[[id]]$dcp_original,
+                       oracle_platform = o$versions$platform)
   }
 })
 

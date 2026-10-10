@@ -26,6 +26,17 @@ Branch `v2`. Plan: `~/.claude/plans/read-known-issues-md-news-md-and-serene-bear
   (R 4.5.2) at ~1e-15 in the curves, with identical endpoints/flags. That is
   the empirical basis for the "equivalent within tolerance + frozen
   reference" policy.
+- **Across platforms the gap is larger.** The first CI run (x86_64 Linux,
+  R 4.5.3) reproduced every endpoint and signal flag exactly but showed
+  curve differences up to ~2e-7 dCp on the short-segment parameter sets
+  (`outmost`, `mid`, `w120`), and 1-ulp differences in the *parsed input*
+  (base `read.csv` is not correctly rounded on every platform; the oracle
+  was parsed by readr on macOS). `smooth.spline(cv = TRUE)`'s lambda search
+  amplifies ulp-level input changes. Test policy is therefore: bit-identical
+  on the oracle's recorded platform, otherwise an absolute bound of 1e-5 dCp
+  on curves and 1e-9 on parsed inputs (`core/tests/testthat/helper-fixtures.R`).
+  Consequence for the Cancers replication vignette: state the platform, or
+  expect agreement to ~1e-5 rather than to the bit.
 
 ## Native timings (Apple Silicon, R 4.5.2)
 

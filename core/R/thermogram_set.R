@@ -53,7 +53,7 @@ read_thermogram_csv <- function(path) {
   # Strip a byte-order mark from the first column name by hand instead.
   x <- utils::read.csv(path, check.names = FALSE, encoding = "UTF-8",
                        stringsAsFactors = FALSE)
-  names(x)[1L] <- sub("^﻿", "", names(x)[1L])
+  names(x)[1L] <- sub("^\ufeff", "", names(x)[1L])
   cols <- names(x)
 
   if (all(c("Sample_ID", "Temperature", "dCp") %in% cols)) {
